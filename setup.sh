@@ -1,437 +1,921 @@
 #!/bin/bash
 
-echo "🔧 Fixing Mint API - Adding Streak Logic"
+echo "🎮 Chain Reaction - Phase 5: Profile & Leaderboard"
+echo "==================================================="
 
-cat > app/api/mint/route.ts << 'EOF'
-import { NextRequest, NextResponse } from 'next/server'
-import { getUsersCollection, getDiscoveriesCollection } from '@/lib/mongodb'
+mkdir -p components/game
 
-export async function POST(req: NextRequest) {
-  try {
-    const { 
-      address, 
-      formula, 
-      name, 
-      rarity, 
-      points, 
-      txHash,
-      tokenId 
-    } = await req.json()
+# ============================================
+# 1. LEADERBOARD COMPONENT (NEW)
+# ============================================
+cat > components/game/Leaderboard.tsx << 'EOF'
+'use client'
 
-    if (!address || !formula || !txHash) {
-      return NextResponse.json(
-        { error: 'Missing required fields: address, formula, txHash' }, 
-        { status: 400 }
-      )
-    }
+import { useState, useEffect } from 'react'
+import { useAccount } from 'wagmi'
 
-    const users = await getUsersCollection()
-    const discoveries = await getDiscoveriesCollection()
-    const now = new Date()
-    const addressLower = address.toLowerCase()
+interface LeaderboardEntry {
+  rank: number
+  address: string
+  username?: string
+  fid?: number
+  points: number
+  level: number
+  totalMints: number
+  discoveryCount: number
+  badgeCount: number
+}
 
-    // Check for duplicate mint (same tx hash)
-    const existingMint = await discoveries.findOne({ txHash })
-    if (existingMint) {
-      return NextResponse.json(
-        { error: 'Mint already recorded', existing: true },
-        { status: 400 }
-      )
-    }
+interface UserRank {
+  rank: number | null
+  totalPlayers: number
+  address: string
+  username?: string
+  points: number
+  level: number
+  totalMints: number
+  discoveryCount: number
+  percentile: number
+}
 
-    // Check if user already discovered this compound (optional: allow re-mints)
-    const existingDiscovery = await discoveries.findOne({ 
-      address: addressLower, 
-      formula 
-    })
-    const isNewDiscovery = !existingDiscovery
+export function Leaderboard() {
+  const { address } = useAccount()
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
+  const [userRank, setUserRank] = useState<UserRank | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [activeFilter, setActiveFilter] = useState<'all' | 'weekly'>('all')
 
-    // Record the mint/discovery
-    const discovery = {
-      address: addressLower,
-      formula,
-      name,
-      rarity,
-      points,
-      txHash,
-      tokenId,
-      isNewDiscovery,
-      mintedAt: now,
-      createdAt: now
-    }
+  useEffect(() => {
+    fetchLeaderboard()
+    if (address) fetchUserRank()
+  }, [address])
 
-    await discoveries.insertOne(discovery)
-
-    // Update or create user with streak increment
-    const userUpdate = await users.findOneAndUpdate(
-      { address: addressLower },
-      {
-        $inc: { 
-          points, 
-          totalMints: 1,
-          streak: 1  // Increment streak on successful mint
-        },
-        $push: { 
-          discoveries: {
-            formula,
-            name,
-            rarity,
-            points,
-            txHash,
-            tokenId,
-            isNewDiscovery,
-            mintedAt: now
-          }
-        },
-        $set: { 
-          updatedAt: now,
-          lastMintAt: now  // Track last mint time for streak decay
-        },
-        $setOnInsert: {
-          address: addressLower,
-          badges: [],
-          createdAt: now
-        }
-      },
-      { upsert: true, returnDocument: 'after' }
-    )
-
-    const user = userUpdate
-
-    // Check and award badges
-    const newBadges: string[] = []
-    const currentBadges = user?.badges || []
-    const discoveryCount = user?.discoveries?.length || 0
-    const currentStreak = user?.streak || 0
-
-    const badgeChecks = [
-      { id: 'first', condition: discoveryCount >= 1 },
-      { id: 'chemist', condition: discoveryCount >= 5 },
-      { id: 'scientist', condition: discoveryCount >= 10 },
-      { id: 'master', condition: discoveryCount >= 25 },
-      { id: 'rare', condition: rarity === 'rare' },
-      { id: 'epic', condition: rarity === 'epic' },
-      { id: 'legendary', condition: rarity === 'legendary' },
-      { id: 'streak', condition: currentStreak >= 5 },  // On Fire badge
-      { id: 'streak10', condition: currentStreak >= 10 }, // Hot Streak badge
-    ]
-
-    for (const check of badgeChecks) {
-      if (check.condition && !currentBadges.includes(check.id)) {
-        newBadges.push(check.id)
+  const fetchLeaderboard = async () => {
+    try {
+      const res = await fetch('/api/leaderboard?limit=50')
+      const data = await res.json()
+      if (Array.isArray(data)) {
+        setLeaderboard(data)
       }
+    } catch (err) {
+      console.error('Failed to fetch leaderboard:', err)
+    } finally {
+      setIsLoading(false)
     }
+  }
 
-    if (newBadges.length > 0) {
-      await users.updateOne(
-        { address: addressLower },
-        { $push: { badges: { $each: newBadges } } }
-      )
+  const fetchUserRank = async () => {
+    if (!address) return
+    try {
+      const res = await fetch(`/api/leaderboard/rank?address=${address}`)
+      const data = await res.json()
+      if (data.rank !== undefined) {
+        setUserRank(data)
+      }
+    } catch (err) {
+      console.error('Failed to fetch user rank:', err)
     }
+  }
 
-    // Calculate level
-    const totalPoints = user?.points || points
-    const level = Math.floor(totalPoints / 1000) + 1
+  const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
-    return NextResponse.json({
-      success: true,
-      discovery,
-      isNewDiscovery,
-      newBadges,
-      totalPoints,
-      totalMints: user?.totalMints || 1,
-      streak: currentStreak,
-      level
-    })
+  const getRankDisplay = (rank: number) => {
+    if (rank === 1) return '🥇'
+    if (rank === 2) return '🥈'
+    if (rank === 3) return '🥉'
+    return `#${rank}`
+  }
 
-  } catch (error) {
-    console.error('Mint API error:', error)
-    return NextResponse.json(
-      { error: 'Server error' }, 
-      { status: 500 }
+  const getRankStyle = (rank: number) => {
+    if (rank === 1) return 'bg-gradient-to-r from-[#FFD700]/20 to-[#FFA500]/20 border-[#FFD700]/50'
+    if (rank === 2) return 'bg-gradient-to-r from-[#C0C0C0]/20 to-[#A0A0A0]/20 border-[#C0C0C0]/50'
+    if (rank === 3) return 'bg-gradient-to-r from-[#CD7F32]/20 to-[#B87333]/20 border-[#CD7F32]/50'
+    return 'bg-[#001226] border-[#0A5CDD]/20'
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-full pb-20 items-center justify-center">
+        <div className="animate-spin text-4xl mb-4">🏆</div>
+        <p className="text-[#6B7280]">Loading rankings...</p>
+      </div>
     )
   }
-}
 
-// Get mint history for an address
-export async function GET(req: NextRequest) {
-  try {
-    const address = req.nextUrl.searchParams.get('address')
-    
-    if (!address) {
-      return NextResponse.json(
-        { error: 'Address required' },
-        { status: 400 }
-      )
-    }
+  return (
+    <div className="flex flex-col h-full pb-20">
+      {/* Header */}
+      <div className="bg-[#001226] border-b border-[#0A5CDD]/20 p-4">
+        <h1 className="text-xl font-bold text-white text-center mb-1">🏆 Leaderboard</h1>
+        <p className="text-[#6B7280] text-xs text-center">Top Scientists on Base</p>
+        
+        {/* Filter Tabs */}
+        <div className="flex gap-2 mt-4 justify-center">
+          {['all', 'weekly'].map((filter) => (
+            <button
+              key={filter}
+              onClick={() => setActiveFilter(filter as 'all' | 'weekly')}
+              className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                activeFilter === filter
+                  ? 'bg-[#0A5CDD] text-white'
+                  : 'bg-[#1F2937] text-[#6B7280]'
+              }`}
+            >
+              {filter === 'all' ? 'All Time' : 'This Week'}
+            </button>
+          ))}
+        </div>
+      </div>
 
-    const discoveries = await getDiscoveriesCollection()
-    const mints = await discoveries
-      .find({ address: address.toLowerCase() })
-      .sort({ mintedAt: -1 })
-      .toArray()
+      {/* Top 3 Podium */}
+      {leaderboard.length >= 3 && (
+        <div className="px-4 py-6 bg-gradient-to-b from-[#001226] to-transparent">
+          <div className="flex justify-center items-end gap-2">
+            {/* 2nd Place */}
+            <div className="flex flex-col items-center">
+              <div className="w-16 h-16 bg-gradient-to-br from-[#C0C0C0] to-[#808080] rounded-full flex items-center justify-center text-2xl mb-2 shadow-lg">
+                🥈
+              </div>
+              <p className="text-white text-xs font-medium truncate max-w-[80px]">
+                {leaderboard[1]?.username || formatAddress(leaderboard[1]?.address || '')}
+              </p>
+              <p className="text-[#0A5CDD] text-sm font-bold">{leaderboard[1]?.points.toLocaleString()}</p>
+              <div className="w-16 h-16 bg-[#C0C0C0]/20 rounded-t-lg mt-2" />
+            </div>
 
-    return NextResponse.json({ 
-      mints,
-      total: mints.length 
-    })
+            {/* 1st Place */}
+            <div className="flex flex-col items-center -mt-4">
+              <div className="w-20 h-20 bg-gradient-to-br from-[#FFD700] to-[#FFA500] rounded-full flex items-center justify-center text-3xl mb-2 shadow-xl animate-pulse">
+                🥇
+              </div>
+              <p className="text-white text-sm font-bold truncate max-w-[90px]">
+                {leaderboard[0]?.username || formatAddress(leaderboard[0]?.address || '')}
+              </p>
+              <p className="text-[#FFD700] text-lg font-bold">{leaderboard[0]?.points.toLocaleString()}</p>
+              <div className="w-20 h-24 bg-[#FFD700]/20 rounded-t-lg mt-2" />
+            </div>
 
-  } catch (error) {
-    console.error('Get mints error:', error)
-    return NextResponse.json(
-      { error: 'Server error' },
-      { status: 500 }
-    )
-  }
+            {/* 3rd Place */}
+            <div className="flex flex-col items-center">
+              <div className="w-16 h-16 bg-gradient-to-br from-[#CD7F32] to-[#8B4513] rounded-full flex items-center justify-center text-2xl mb-2 shadow-lg">
+                🥉
+              </div>
+              <p className="text-white text-xs font-medium truncate max-w-[80px]">
+                {leaderboard[2]?.username || formatAddress(leaderboard[2]?.address || '')}
+              </p>
+              <p className="text-[#CD7F32] text-sm font-bold">{leaderboard[2]?.points.toLocaleString()}</p>
+              <div className="w-16 h-12 bg-[#CD7F32]/20 rounded-t-lg mt-2" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rankings List */}
+      <div className="flex-1 overflow-auto px-4">
+        <p className="text-[#6B7280] text-xs mb-3">
+          {leaderboard.length > 0 ? `${leaderboard.length} Scientists Ranked` : 'No rankings yet'}
+        </p>
+        
+        <div className="space-y-2">
+          {leaderboard.slice(3).map((player) => (
+            <div
+              key={player.address}
+              className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                address?.toLowerCase() === player.address
+                  ? 'bg-[#0A5CDD]/20 border-[#0A5CDD]/50'
+                  : 'bg-[#001226] border-[#0A5CDD]/20'
+              }`}
+            >
+              <span className="text-[#6B7280] font-mono text-sm w-8">
+                #{player.rank}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-medium text-sm truncate">
+                  {player.username || formatAddress(player.address)}
+                </p>
+                <div className="flex gap-2 text-xs text-[#6B7280]">
+                  <span>Lv.{player.level}</span>
+                  <span>•</span>
+                  <span>{player.totalMints} mints</span>
+                </div>
+              </div>
+              <p className="text-[#0A5CDD] font-bold">{player.points.toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+
+        {leaderboard.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-4xl mb-3">🧪</p>
+            <p className="text-[#6B7280]">No scientists ranked yet</p>
+            <p className="text-[#4B5563] text-xs mt-1">Be the first to mint!</p>
+          </div>
+        )}
+      </div>
+
+      {/* Your Rank (Sticky Footer) */}
+      {userRank && userRank.rank && (
+        <div className="px-4 pb-4 pt-2 bg-gradient-to-t from-[#000814] to-transparent">
+          <div className="bg-[#0A5CDD]/20 border border-[#0A5CDD]/50 rounded-xl p-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-[#0A5CDD] rounded-full flex items-center justify-center text-lg">
+                {userRank.rank <= 3 ? getRankDisplay(userRank.rank) : '👤'}
+              </div>
+              <div className="flex-1">
+                <p className="text-white font-medium text-sm">Your Rank</p>
+                <div className="flex gap-2 text-xs text-[#6B7280]">
+                  <span>Top {userRank.percentile}%</span>
+                  <span>•</span>
+                  <span>Lv.{userRank.level}</span>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-[#0A5CDD] font-bold text-lg">#{userRank.rank}</p>
+                <p className="text-[#6B7280] text-xs">{userRank.points.toLocaleString()} pts</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 EOF
 
-# Add streak reset API for failed reactions
-mkdir -p app/api/game
+echo "✅ components/game/Leaderboard.tsx"
 
-cat > app/api/game/streak-reset/route.ts << 'EOF'
-import { NextRequest, NextResponse } from 'next/server'
-import { getUsersCollection } from '@/lib/mongodb'
+# ============================================
+# 2. UPDATED PROFILE COMPONENT
+# ============================================
+cat > components/game/Profile.tsx << 'EOF'
+'use client'
 
-// Reset streak on failed reaction
-export async function POST(req: NextRequest) {
-  try {
-    const { address } = await req.json()
-    
-    if (!address) {
-      return NextResponse.json(
-        { error: 'Address required' },
-        { status: 400 }
-      )
-    }
+import { useState, useEffect } from 'react'
+import { useAccount } from 'wagmi'
+import { BADGES, RARITY_COLORS, RARITY_GLOW, type Rarity } from '@/lib/gameData'
 
-    const users = await getUsersCollection()
-    const addressLower = address.toLowerCase()
-
-    const result = await users.findOneAndUpdate(
-      { address: addressLower },
-      { 
-        $set: { 
-          streak: 0,
-          updatedAt: new Date()
-        }
-      },
-      { returnDocument: 'after' }
-    )
-
-    return NextResponse.json({
-      success: true,
-      streak: 0,
-      message: 'Streak reset'
-    })
-
-  } catch (error) {
-    console.error('Streak reset error:', error)
-    return NextResponse.json(
-      { error: 'Server error' },
-      { status: 500 }
-    )
-  }
-}
-EOF
-
-# Update badges in gameData to include new streak badges
-cat > lib/gameData.ts << 'EOF'
-export interface Atom {
-  symbol: string
-  name: string
-  color: string
-  bgColor: string
-}
-
-export interface Compound {
+interface Discovery {
   formula: string
   name: string
-  atoms: Record<string, number>
-  baseRarity: Rarity
-  hint: string
-}
-
-export type Rarity = 'common' | 'rare' | 'epic' | 'legendary'
-
-export interface RolledCompound extends Compound {
   rarity: Rarity
   points: number
+  txHash?: string
+  mintedAt: string
 }
 
-export interface Badge {
-  id: string
-  name: string
-  icon: string
-  requirement: string
-  threshold: number
+interface UserData {
+  address: string
+  username?: string
+  fid?: number
+  points: number
+  level: number
+  streak: number
+  totalMints: number
+  discoveries: Discovery[]
+  badges: string[]
 }
 
-export const ATOMS: Atom[] = [
-  { symbol: 'H', name: 'Hydrogen', color: '#FFFFFF', bgColor: '#6B7280' },
-  { symbol: 'O', name: 'Oxygen', color: '#FFFFFF', bgColor: '#DC2626' },
-  { symbol: 'C', name: 'Carbon', color: '#FFFFFF', bgColor: '#1F2937' },
-  { symbol: 'N', name: 'Nitrogen', color: '#FFFFFF', bgColor: '#2563EB' },
-  { symbol: 'Cl', name: 'Chlorine', color: '#000000', bgColor: '#22C55E' },
-  { symbol: 'Na', name: 'Sodium', color: '#000000', bgColor: '#EAB308' },
-]
-
-export const COMPOUNDS: Compound[] = [
-  { formula: 'H2O', name: 'Water', atoms: { H: 2, O: 1 }, baseRarity: 'common', hint: 'Essential for life!' },
-  { formula: 'CO2', name: 'Carbon Dioxide', atoms: { C: 1, O: 2 }, baseRarity: 'common', hint: 'You breathe this out' },
-  { formula: 'CH4', name: 'Methane', atoms: { C: 1, H: 4 }, baseRarity: 'common', hint: 'Natural gas fuel' },
-  { formula: 'NH3', name: 'Ammonia', atoms: { N: 1, H: 3 }, baseRarity: 'rare', hint: 'Strong smell cleaner' },
-  { formula: 'HCl', name: 'Hydrochloric Acid', atoms: { H: 1, Cl: 1 }, baseRarity: 'rare', hint: 'In your stomach' },
-  { formula: 'NaCl', name: 'Salt', atoms: { Na: 1, Cl: 1 }, baseRarity: 'rare', hint: 'Table seasoning' },
-  { formula: 'C2H6O', name: 'Ethanol', atoms: { C: 2, H: 6, O: 1 }, baseRarity: 'epic', hint: 'Party drink' },
-  { formula: 'H2O2', name: 'Hydrogen Peroxide', atoms: { H: 2, O: 2 }, baseRarity: 'epic', hint: 'Bleaching agent' },
-  { formula: 'NaOH', name: 'Sodium Hydroxide', atoms: { Na: 1, O: 1, H: 1 }, baseRarity: 'epic', hint: 'Lye soap base' },
-  { formula: 'C6H12O6', name: 'Glucose', atoms: { C: 6, H: 12, O: 6 }, baseRarity: 'legendary', hint: 'Sugar energy' },
-  { formula: 'C8H10N4O2', name: 'Caffeine', atoms: { C: 8, H: 10, N: 4, O: 2 }, baseRarity: 'legendary', hint: 'Morning fuel' },
-]
-
-export const BADGES: Badge[] = [
-  { id: 'first', name: 'First Reaction', icon: '🔰', requirement: 'Create first compound', threshold: 1 },
-  { id: 'chemist', name: 'Chemist', icon: '⚗️', requirement: 'Create 5 compounds', threshold: 5 },
-  { id: 'scientist', name: 'Mad Scientist', icon: '🧬', requirement: 'Create 10 compounds', threshold: 10 },
-  { id: 'master', name: 'Master Chemist', icon: '🎓', requirement: 'Create 25 compounds', threshold: 25 },
-  { id: 'rare', name: 'Rare Hunter', icon: '💎', requirement: 'Mint a Rare NFT', threshold: 1 },
-  { id: 'epic', name: 'Epic Finder', icon: '🔮', requirement: 'Mint an Epic NFT', threshold: 1 },
-  { id: 'legendary', name: 'Legend', icon: '👑', requirement: 'Mint a Legendary NFT', threshold: 1 },
-  { id: 'streak', name: 'On Fire', icon: '🔥', requirement: '5 mint streak', threshold: 5 },
-  { id: 'streak10', name: 'Unstoppable', icon: '⚡', requirement: '10 mint streak', threshold: 10 },
-]
-
-export const RARITY_COLORS: Record<Rarity, string> = {
-  common: '#9CA3AF',
-  rare: '#3B82F6',
-  epic: '#A855F7',
-  legendary: '#F59E0B',
+interface ProfileProps {
+  farcasterUser?: {
+    fid?: number
+    username?: string
+    displayName?: string
+    pfpUrl?: string
+  }
 }
 
-export const RARITY_GLOW: Record<Rarity, string> = {
-  common: '0 0 20px #9CA3AF',
-  rare: '0 0 30px #3B82F6',
-  epic: '0 0 40px #A855F7',
-  legendary: '0 0 50px #F59E0B, 0 0 100px #F59E0B50',
-}
+type TabType = 'nfts' | 'badges' | 'stats'
 
-export const POINTS_BY_RARITY: Record<Rarity, number> = {
-  common: 100,
-  rare: 250,
-  epic: 500,
-  legendary: 1000,
-}
+export function Profile({ farcasterUser }: ProfileProps) {
+  const [activeTab, setActiveTab] = useState<TabType>('nfts')
+  const [userData, setUserData] = useState<UserData | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const { address } = useAccount()
 
-const RARITY_ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary']
+  useEffect(() => {
+    if (address) {
+      fetchUserData()
+    } else {
+      setIsLoading(false)
+    }
+  }, [address])
 
-const UPGRADE_CHANCES: Record<Rarity, Record<Rarity, number>> = {
-  common: { common: 0.815, rare: 0.15, epic: 0.03, legendary: 0.005 },
-  rare: { common: 0, rare: 0.85, epic: 0.12, legendary: 0.03 },
-  epic: { common: 0, rare: 0, epic: 0.90, legendary: 0.10 },
-  legendary: { common: 0, rare: 0, epic: 0, legendary: 1.0 },
-}
-
-export function rollRarity(baseRarity: Rarity): Rarity {
-  const chances = UPGRADE_CHANCES[baseRarity]
-  const roll = Math.random()
-  
-  let cumulative = 0
-  for (const rarity of RARITY_ORDER) {
-    cumulative += chances[rarity]
-    if (roll < cumulative) {
-      return rarity
+  const fetchUserData = async () => {
+    if (!address) return
+    try {
+      const res = await fetch(`/api/user?address=${address}`)
+      if (res.ok) {
+        const data = await res.json()
+        setUserData(data)
+      }
+    } catch (err) {
+      console.error('Failed to fetch user data:', err)
+    } finally {
+      setIsLoading(false)
     }
   }
-  
-  return baseRarity
-}
 
-export function getPointsForRarity(rarity: Rarity): number {
-  return POINTS_BY_RARITY[rarity]
-}
+  const tabs = [
+    { id: 'nfts' as const, label: '🧪 NFTs', count: userData?.discoveries?.length || 0 },
+    { id: 'badges' as const, label: '🏅 Badges', count: userData?.badges?.length || 0 },
+    { id: 'stats' as const, label: '📊 Stats' },
+  ]
 
-export function formatFormula(atoms: Record<string, number>): string {
-  const order = ['C', 'H']
-  const sorted = Object.entries(atoms).sort(([a], [b]) => {
-    const aIdx = order.indexOf(a)
-    const bIdx = order.indexOf(b)
-    if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx
-    if (aIdx !== -1) return -1
-    if (bIdx !== -1) return 1
-    return a.localeCompare(b)
-  })
-  
-  return sorted
-    .map(([symbol, count]) => `${symbol}${count > 1 ? count : ''}`)
-    .join('')
-}
+  const level = userData?.level || 1
+  const points = userData?.points || 0
+  const nextLevelPoints = level * 1000
+  const progress = ((points % 1000) / 1000) * 100
 
-export function checkCompound(selectedAtoms: string[]): RolledCompound | null {
-  const atomCount: Record<string, number> = {}
-  selectedAtoms.forEach(atom => {
-    atomCount[atom] = (atomCount[atom] || 0) + 1
-  })
-  
-  const compound = COMPOUNDS.find(c => {
-    const keys1 = Object.keys(c.atoms).sort()
-    const keys2 = Object.keys(atomCount).sort()
-    if (keys1.length !== keys2.length) return false
-    return keys1.every(key => c.atoms[key] === atomCount[key])
-  })
+  const displayName = farcasterUser?.displayName || farcasterUser?.username || 
+    (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Not Connected')
 
-  if (!compound) return null
-
-  const rarity = rollRarity(compound.baseRarity)
-  const points = getPointsForRarity(rarity)
-
-  return {
-    ...compound,
-    rarity,
-    points,
+  if (isLoading) {
+    return (
+      <div className="flex flex-col h-full pb-20 items-center justify-center">
+        <div className="animate-spin text-4xl mb-4">🧬</div>
+        <p className="text-[#6B7280]">Loading profile...</p>
+      </div>
+    )
   }
-}
 
-export function generateTokenURI(
-  formula: string,
-  name: string,
-  rarity: Rarity,
-  points: number
-): string {
-  const metadata = {
-    name: `${name} (${formula})`,
-    description: `A ${rarity} molecule discovered in Chain Reaction Labs`,
-    attributes: [
-      { trait_type: 'Formula', value: formula },
-      { trait_type: 'Name', value: name },
-      { trait_type: 'Rarity', value: rarity },
-      { trait_type: 'Points', value: points },
-    ],
-  }
-  
-  const json = JSON.stringify(metadata)
-  const base64 = Buffer.from(json).toString('base64')
-  return `data:application/json;base64,${base64}`
-}
+  return (
+    <div className="flex flex-col h-full pb-20">
+      {/* Profile Header */}
+      <div className="bg-[#001226] border-b border-[#0A5CDD]/20 p-4">
+        <div className="flex items-center gap-4">
+          {/* Avatar */}
+          <div className="relative">
+            {farcasterUser?.pfpUrl ? (
+              <img 
+                src={farcasterUser.pfpUrl} 
+                alt="Profile" 
+                className="w-16 h-16 rounded-full object-cover border-2 border-[#0A5CDD]"
+              />
+            ) : (
+              <div className="w-16 h-16 bg-gradient-to-br from-[#0A5CDD] to-[#2563EB] rounded-full flex items-center justify-center text-2xl">
+                🧬
+              </div>
+            )}
+            <div className="absolute -bottom-1 -right-1 bg-[#0A5CDD] text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
+              {level}
+            </div>
+          </div>
 
-export function getBadgeById(id: string): Badge | undefined {
-  return BADGES.find(b => b.id === id)
-}
+          {/* Info */}
+          <div className="flex-1">
+            <p className="text-white font-bold text-lg">{displayName}</p>
+            {farcasterUser?.fid && (
+              <p className="text-[#6B7280] text-xs">FID: {farcasterUser.fid}</p>
+            )}
+            <p className="text-[#0A5CDD] text-sm font-medium">
+              {level < 5 ? 'Apprentice' : level < 10 ? 'Scientist' : level < 20 ? 'Expert' : 'Master'} Chemist
+            </p>
+          </div>
+        </div>
 
-export const LEADERBOARD_MOCK = [
-  { rank: 1, address: '0xAAA...1234', points: 45200, level: 28 },
-  { rank: 2, address: '0xBBB...5678', points: 38100, level: 24 },
-  { rank: 3, address: '0xCCC...9012', points: 31500, level: 21 },
-  { rank: 4, address: '0xDDD...3456', points: 28900, level: 19 },
-  { rank: 5, address: '0xEEE...7890', points: 25400, level: 17 },
-]
+        {/* Level Progress */}
+        <div className="mt-4">
+          <div className="flex justify-between text-xs mb-1">
+            <span className="text-[#6B7280]">Level {level}</span>
+            <span className="text-[#6B7280]">{points.toLocaleString()} / {nextLevelPoints.toLocaleString()} XP</span>
+          </div>
+          <div className="h-2 bg-[#1F2937] rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-gradient-to-r from-[#0A5CDD] to-[#22C55E] transition-all duration-500"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Quick Stats */}
+        <div className="flex gap-4 mt-4">
+          <div className="flex-1 bg-[#0A0A0A] rounded-xl p-3 text-center">
+            <p className="text-[#0A5CDD] text-xl font-bold">{userData?.totalMints || 0}</p>
+            <p className="text-[#6B7280] text-xs">Minted</p>
+          </div>
+          <div className="flex-1 bg-[#0A0A0A] rounded-xl p-3 text-center">
+            <p className="text-[#22C55E] text-xl font-bold">{userData?.streak || 0}</p>
+            <p className="text-[#6B7280] text-xs">Streak</p>
+          </div>
+          <div className="flex-1 bg-[#0A0A0A] rounded-xl p-3 text-center">
+            <p className="text-[#F59E0B] text-xl font-bold">{userData?.badges?.length || 0}</p>
+            <p className="text-[#6B7280] text-xs">Badges</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-[#0A5CDD]/20">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`flex-1 py-3 text-sm font-medium transition-colors relative ${
+              activeTab === tab.id 
+                ? 'text-[#0A5CDD] border-b-2 border-[#0A5CDD]' 
+                : 'text-[#6B7280]'
+            }`}
+          >
+            {tab.label}
+            {tab.count !== undefined && tab.count > 0 && (
+              <span className="ml-1 text-xs bg-[#0A5CDD]/20 px-1.5 py-0.5 rounded-full">
+                {tab.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      <div className="flex-1 overflow-auto p-4">
+        {/* NFTs Tab */}
+        {activeTab === 'nfts' && (
+          <div>
+            {!userData?.discoveries?.length ? (
+              <div className="text-center py-12">
+                <p className="text-5xl mb-4">🧪</p>
+                <p className="text-white font-medium mb-1">No molecules yet</p>
+                <p className="text-[#6B7280] text-sm">Create compounds in the Lab to mint NFTs!</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {userData.discoveries.map((compound, index) => (
+                  <div 
+                    key={index} 
+                    className="bg-[#001226] border rounded-xl p-4 text-center transition-all hover:scale-105"
+                    style={{ 
+                      borderColor: `${RARITY_COLORS[compound.rarity]}50`,
+                      boxShadow: RARITY_GLOW[compound.rarity]
+                    }}
+                  >
+                    <div 
+                      className="text-3xl mb-2"
+                      style={{ textShadow: RARITY_GLOW[compound.rarity] }}
+                    >
+                      {compound.rarity === 'legendary' ? '👑' : 
+                       compound.rarity === 'epic' ? '🔮' : 
+                       compound.rarity === 'rare' ? '💎' : '⚗️'}
+                    </div>
+                    <p className="text-white font-mono font-bold text-lg">{compound.formula}</p>
+                    <p className="text-[#6B7280] text-xs truncate">{compound.name}</p>
+                    <p 
+                      className="text-xs mt-2 font-medium uppercase"
+                      style={{ color: RARITY_COLORS[compound.rarity] }}
+                    >
+                      {compound.rarity}
+                    </p>
+                    <p className="text-[#6B7280] text-xs mt-1">+{compound.points} pts</p>
+                    {compound.txHash && (
+                      <a
+                        href={`https://basescan.org/tx/${compound.txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#0A5CDD] text-xs mt-2 inline-block hover:underline"
+                      >
+                        View TX ↗
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Badges Tab */}
+        {activeTab === 'badges' && (
+          <div className="space-y-3">
+            {BADGES.map(badge => {
+              const isEarned = userData?.badges?.includes(badge.id)
+              return (
+                <div 
+                  key={badge.id} 
+                  className={`flex items-center gap-3 p-4 rounded-xl border transition-all ${
+                    isEarned 
+                      ? 'bg-[#001226] border-[#22C55E]/50' 
+                      : 'bg-[#0a0a0a] border-[#1F2937] opacity-50'
+                  }`}
+                >
+                  <span className={`text-3xl ${isEarned ? '' : 'grayscale'}`}>{badge.icon}</span>
+                  <div className="flex-1">
+                    <p className={`font-medium ${isEarned ? 'text-white' : 'text-[#6B7280]'}`}>
+                      {badge.name}
+                    </p>
+                    <p className="text-xs text-[#6B7280]">{badge.requirement}</p>
+                  </div>
+                  {isEarned ? (
+                    <span className="text-[#22C55E] text-xl">✓</span>
+                  ) : (
+                    <span className="text-[#6B7280]">🔒</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* Stats Tab */}
+        {activeTab === 'stats' && (
+          <div className="space-y-4">
+            <div className="bg-[#001226] border border-[#0A5CDD]/20 rounded-xl p-4">
+              <p className="text-[#6B7280] text-xs mb-3">OVERVIEW</p>
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span className="text-[#6B7280]">Total Points</span>
+                  <span className="text-white font-bold">{points.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#6B7280]">Total Mints</span>
+                  <span className="text-white font-bold">{userData?.totalMints || 0}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#6B7280]">Current Streak</span>
+                  <span className="text-white font-bold">{userData?.streak || 0} 🔥</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#6B7280]">Badges Earned</span>
+                  <span className="text-white font-bold">{userData?.badges?.length || 0} / {BADGES.length}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Rarity Breakdown */}
+            <div className="bg-[#001226] border border-[#0A5CDD]/20 rounded-xl p-4">
+              <p className="text-[#6B7280] text-xs mb-3">RARITY BREAKDOWN</p>
+              {(['legendary', 'epic', 'rare', 'common'] as Rarity[]).map(rarity => {
+                const count = userData?.discoveries?.filter(d => d.rarity === rarity).length || 0
+                return (
+                  <div key={rarity} className="flex items-center gap-3 py-2">
+                    <span 
+                      className="w-3 h-3 rounded-full"
+                      style={{ backgroundColor: RARITY_COLORS[rarity] }}
+                    />
+                    <span className="flex-1 text-[#6B7280] capitalize">{rarity}</span>
+                    <span className="text-white font-bold">{count}</span>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Recent Activity */}
+            <div className="bg-[#001226] border border-[#0A5CDD]/20 rounded-xl p-4">
+              <p className="text-[#6B7280] text-xs mb-3">RECENT MINTS</p>
+              {userData?.discoveries?.slice(0, 5).map((d, i) => (
+                <div key={i} className="flex items-center gap-3 py-2 border-b border-[#1F2937] last:border-0">
+                  <span 
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: RARITY_COLORS[d.rarity] }}
+                  />
+                  <span className="flex-1 text-white text-sm">{d.name}</span>
+                  <span className="text-[#6B7280] text-xs">+{d.points}</span>
+                </div>
+              )) || <p className="text-[#6B7280] text-sm">No mints yet</p>}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 EOF
 
+echo "✅ components/game/Profile.tsx"
+
+# ============================================
+# 3. UPDATED APP.TSX WITH API SYNC
+# ============================================
+cat > components/pages/app.tsx << 'EOF'
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { useAccount } from 'wagmi'
+import { SafeAreaContainer } from '@/components/safe-area-container'
+import { SplashScreen, Navbar, GameArena, Profile, Header, Leaderboard } from '@/components/game'
+import type { RolledCompound } from '@/lib/gameData'
+
+type Screen = 'splash' | 'lab' | 'ranks' | 'profile'
+
+interface FarcasterUser {
+  fid?: number
+  username?: string
+  displayName?: string
+  pfpUrl?: string
+}
+
+// Farcaster SDK hook with fallback
+function useFarcasterOrLocal() {
+  const [context, setContext] = useState<any>(undefined)
+  const [farcasterUser, setFarcasterUser] = useState<FarcasterUser | undefined>()
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSDKLoaded, setIsSDKLoaded] = useState(false)
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const sdk = (await import('@farcaster/miniapp-sdk')).default
+        const ctx = await sdk.context
+        
+        if (ctx) {
+          setContext(ctx)
+          setIsSDKLoaded(true)
+          
+          // Extract Farcaster user info
+          if (ctx.user) {
+            setFarcasterUser({
+              fid: ctx.user.fid,
+              username: ctx.user.username,
+              displayName: ctx.user.displayName,
+              pfpUrl: ctx.user.pfpUrl,
+            })
+          }
+          
+          await sdk.actions.ready()
+        } else {
+          setIsSDKLoaded(true)
+        }
+      } catch (e) {
+        console.log('Running in local mode')
+        setIsSDKLoaded(true)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    init()
+  }, [])
+
+  return { context, farcasterUser, isLoading, isSDKLoaded }
+}
+
+export default function App() {
+  const { context, farcasterUser, isLoading, isSDKLoaded } = useFarcasterOrLocal()
+  const { address, isConnected } = useAccount()
+  
+  const [screen, setScreen] = useState<Screen>('splash')
+  const [points, setPoints] = useState(0)
+  const [streak, setStreak] = useState(0)
+  const [discoveries, setDiscoveries] = useState<any[]>([])
+  const [earnedBadges, setEarnedBadges] = useState<string[]>([])
+  const [isUserLoaded, setIsUserLoaded] = useState(false)
+
+  // Calculate level from points
+  const level = Math.floor(points / 1000) + 1
+
+  // Fetch user data from API on connect
+  const fetchUserData = useCallback(async () => {
+    if (!address) return
+    
+    try {
+      // Create/update user with Farcaster info
+      await fetch('/api/user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address,
+          fid: farcasterUser?.fid,
+          username: farcasterUser?.username || farcasterUser?.displayName,
+        })
+      })
+
+      // Fetch user data
+      const res = await fetch(`/api/user?address=${address}`)
+      if (res.ok) {
+        const data = await res.json()
+        setPoints(data.points || 0)
+        setStreak(data.streak || 0)
+        setDiscoveries(data.discoveries || [])
+        setEarnedBadges(data.badges || [])
+      }
+    } catch (err) {
+      console.error('Failed to fetch user data:', err)
+    } finally {
+      setIsUserLoaded(true)
+    }
+  }, [address, farcasterUser])
+
+  useEffect(() => {
+    if (address && isSDKLoaded) {
+      fetchUserData()
+    } else if (!address) {
+      setIsUserLoaded(true)
+    }
+  }, [address, isSDKLoaded, fetchUserData])
+
+  const handleSplashComplete = () => setScreen('lab')
+
+  const handleReaction = async (success: boolean, compound: RolledCompound | null) => {
+    if (success && compound) {
+      // Optimistic update
+      setPoints(prev => prev + compound.points)
+      setStreak(prev => prev + 1)
+    } else if (!success && address) {
+      // Reset streak on failed reaction
+      setStreak(0)
+      try {
+        await fetch('/api/game/streak-reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address })
+        })
+      } catch (err) {
+        console.error('Failed to reset streak:', err)
+      }
+    }
+  }
+
+  const handleMintSuccess = async (compound: RolledCompound, txHash: string) => {
+    // Add to discoveries locally
+    const newDiscovery = {
+      ...compound,
+      txHash,
+      mintedAt: new Date().toISOString()
+    }
+    setDiscoveries(prev => [newDiscovery, ...prev])
+    
+    // Refresh user data to get updated badges
+    setTimeout(fetchUserData, 1000)
+  }
+
+  if (isLoading) {
+    return (
+      <SafeAreaContainer insets={context?.client?.safeAreaInsets}>
+        <div className="flex min-h-screen flex-col items-center justify-center bg-[#000814]">
+          <div className="animate-spin text-4xl mb-4">⚛️</div>
+          <div className="text-lg text-white">Loading...</div>
+        </div>
+      </SafeAreaContainer>
+    )
+  }
+
+  if (!isSDKLoaded) {
+    return (
+      <SafeAreaContainer insets={context?.client?.safeAreaInsets}>
+        <div className="flex min-h-screen flex-col items-center justify-center p-4 bg-[#000814]">
+          <h1 className="text-xl font-bold text-center text-white">
+            Please open in Farcaster app
+          </h1>
+        </div>
+      </SafeAreaContainer>
+    )
+  }
+
+  if (screen === 'splash') {
+    return (
+      <SafeAreaContainer insets={context?.client?.safeAreaInsets}>
+        <SplashScreen onComplete={handleSplashComplete} />
+      </SafeAreaContainer>
+    )
+  }
+
+  return (
+    <SafeAreaContainer insets={context?.client?.safeAreaInsets}>
+      <div className="min-h-screen bg-[#000814] text-white flex flex-col">
+        {/* Header */}
+        <Header 
+          points={points} 
+          streak={streak} 
+          level={level}
+          username={farcasterUser?.displayName || farcasterUser?.username}
+          pfpUrl={farcasterUser?.pfpUrl}
+        />
+        
+        {/* Main Content */}
+        <div className="flex-1 overflow-hidden">
+          {screen === 'lab' && (
+            <GameArena 
+              points={points} 
+              streak={streak} 
+              onReaction={handleReaction}
+              onMintSuccess={handleMintSuccess}
+            />
+          )}
+          {screen === 'ranks' && <Leaderboard />}
+          {screen === 'profile' && <Profile farcasterUser={farcasterUser} />}
+        </div>
+        
+        {/* Navbar */}
+        <Navbar 
+          activeTab={screen === 'lab' ? 'lab' : screen === 'ranks' ? 'ranks' : 'profile'} 
+          onTabChange={(tab) => setScreen(tab)} 
+        />
+      </div>
+    </SafeAreaContainer>
+  )
+}
+EOF
+
+echo "✅ components/pages/app.tsx"
+
+# ============================================
+# 4. UPDATE INDEX EXPORT
+# ============================================
+cat > components/game/index.ts << 'EOF'
+export { SplashScreen } from './SplashScreen'
+export { Navbar } from './Navbar'
+export { GameArena } from './GameArena'
+export { Profile } from './Profile'
+export { Leaderboard } from './Leaderboard'
+export { Header } from './Header'
+EOF
+
+echo "✅ components/game/index.ts"
+
+# ============================================
+# 5. UPDATED HEADER WITH AVATAR SUPPORT
+# ============================================
+cat > components/game/Header.tsx << 'EOF'
+'use client'
+
+import { useAccount } from 'wagmi'
+
+interface HeaderProps {
+  points: number
+  streak: number
+  level: number
+  username?: string
+  pfpUrl?: string
+}
+
+export function Header({ points, streak, level, username, pfpUrl }: HeaderProps) {
+  const { address, isConnected } = useAccount()
+
+  return (
+    <header className="bg-[#001226] border-b border-[#0A5CDD]/20 px-4 py-3">
+      <div className="flex items-center justify-between">
+        {/* Logo + Name */}
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-gradient-to-br from-[#0A5CDD] to-[#2563EB] rounded-lg flex items-center justify-center">
+            <span className="text-lg">⚛️</span>
+          </div>
+          <div>
+            <p className="text-white font-bold text-sm leading-tight">Chain Reaction</p>
+            <p className="text-[#6B7280] text-xs leading-tight">Labs</p>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 bg-[#0A0A0A] px-2 py-1 rounded-lg">
+            <span className="text-sm">🔥</span>
+            <span className="text-white text-sm font-bold">{streak}</span>
+          </div>
+          <div className="flex items-center gap-1 bg-[#0A0A0A] px-2 py-1 rounded-lg">
+            <span className="text-sm">⭐</span>
+            <span className="text-white text-sm font-bold">{points.toLocaleString()}</span>
+          </div>
+          <div className="flex items-center gap-1 bg-[#0A5CDD]/20 px-2 py-1 rounded-lg">
+            <span className="text-[#0A5CDD] text-sm font-bold">Lv.{level}</span>
+          </div>
+        </div>
+
+        {/* Avatar */}
+        <div className="flex items-center gap-2">
+          {pfpUrl ? (
+            <img 
+              src={pfpUrl} 
+              alt={username || 'Profile'} 
+              className="w-8 h-8 rounded-full object-cover border border-[#0A5CDD]/50"
+            />
+          ) : (
+            <div className="w-8 h-8 bg-[#1F2937] rounded-full flex items-center justify-center">
+              {isConnected ? (
+                <span className="text-xs text-[#6B7280]">
+                  {address?.slice(2, 4).toUpperCase()}
+                </span>
+              ) : (
+                <span className="text-[#6B7280]">👤</span>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </header>
+  )
+}
+EOF
+
+echo "✅ components/game/Header.tsx"
+
 echo ""
-echo "✅ Updated:"
-echo "  - app/api/mint/route.ts (streak tracking, new badges)"
-echo "  - app/api/game/streak-reset/route.ts (reset on failed reaction)"
-echo "  - lib/gameData.ts (added master + streak10 badges)"
+echo "==================================================="
+echo "🎉 Phase 5 Complete!"
+echo "==================================================="
 echo ""
-echo "Mint API now returns:"
-echo "  { success, discovery, isNewDiscovery, newBadges, totalPoints, totalMints, streak, level }"
+echo "Files created/updated:"
+echo "  ├── components/game/Leaderboard.tsx  (NEW - live rankings)"
+echo "  ├── components/game/Profile.tsx      (Updated - API data)"
+echo "  ├── components/game/Header.tsx       (Updated - avatar support)"
+echo "  ├── components/game/index.ts         (Updated exports)"
+echo "  └── components/pages/app.tsx         (Updated - state sync)"
+echo ""
+echo "Features:"
+echo "  ✅ Live leaderboard from /api/leaderboard"
+echo "  ✅ Top 3 podium display"
+echo "  ✅ Your rank sticky footer"
+echo "  ✅ Profile with real NFT gallery"
+echo "  ✅ Rarity breakdown stats"
+echo "  ✅ Farcaster username + avatar display"
+echo "  ✅ Level progress bar"
+echo "  ✅ State syncs with database on load"
+echo "  ✅ Streak resets on failed reactions"
+echo ""
+echo "Run: chmod +x phase5-profile-leaderboard.sh && ./phase5-profile-leaderboard.sh"
