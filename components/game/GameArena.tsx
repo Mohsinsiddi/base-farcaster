@@ -2,48 +2,22 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useAccount } from 'wagmi'
-import { useMintMolecule, MOLECULE_NFT_ADDRESS } from '@/lib/hooks/useContract'
-import { 
-  ATOMS, 
-  COMPOUNDS,
-  checkCompound, 
-  formatFormula, 
-  RARITY_COLORS, 
-  RARITY_GLOW,
-  generateTokenURI,
-  type RolledCompound,
-  type Rarity,
-  type Compound
-} from '@/lib/gameData'
+import { useMintMolecule } from '@/lib/hooks/useContract'
+import { ElementPicker } from './ElementPicker'
+import { ATOMS, COMPOUNDS, checkCompound, formatFormula, findPartialMatches, predictStableCompounds, RARITY_COLORS, RARITY_GLOW, RARITY_LABELS, generateTokenURI, type RolledCompound, type Rarity } from '@/lib/gameData'
 
 interface GameArenaProps {
   points: number
   streak: number
   onReaction: (success: boolean, compound: RolledCompound | null) => void
   onMintSuccess?: (compound: RolledCompound, txHash: string) => void
-  recentDiscoveries?: string[] // formulas already discovered
+  recentDiscoveries?: string[]
 }
 
 type GameState = 'idle' | 'reacting' | 'reveal' | 'minting' | 'success' | 'failed'
 
 const MIXING_GIF = 'https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExNDc1aTEydHkwMTF0bHdiNWJmaGR3dG11NXBrYzFma2o5djY5cThpcyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l41lUpphqmQnj4TVC/giphy.gif'
-
-// Streak multiplier bonuses
-const getStreakMultiplier = (streak: number): number => {
-  if (streak >= 10) return 2.0
-  if (streak >= 7) return 1.5
-  if (streak >= 5) return 1.25
-  if (streak >= 3) return 1.1
-  return 1.0
-}
-
-const getStreakLabel = (streak: number): string => {
-  if (streak >= 10) return '🔥 UNSTOPPABLE'
-  if (streak >= 7) return '⚡ ON FIRE'
-  if (streak >= 5) return '💥 HOT'
-  if (streak >= 3) return '✨ WARMING UP'
-  return ''
-}
+const getRarityIcon = (r: Rarity) => ({ common: '⚗️', uncommon: '✨', rare: '💎', epic: '🔮', legendary: '👑', mythic: '⚡' }[r])
 
 export function GameArena({ points, streak, onReaction, onMintSuccess, recentDiscoveries = [] }: GameArenaProps) {
   const [selectedAtoms, setSelectedAtoms] = useState<string[]>([])
@@ -52,132 +26,58 @@ export function GameArena({ points, streak, onReaction, onMintSuccess, recentDis
   const [showRarityReveal, setShowRarityReveal] = useState(false)
   const [revealedRarity, setRevealedRarity] = useState<Rarity | null>(null)
   const [isNewDiscovery, setIsNewDiscovery] = useState(false)
-  const [bubbles, setBubbles] = useState<{id: number, x: number, size: number, delay: number}[]>([])
+  const [bubbleKey, setBubbleKey] = useState(0)
 
   const { address, isConnected } = useAccount()
   const { mint, hash, isPending, isConfirming, isSuccess, error, reset } = useMintMolecule()
 
-  // Generate bubbles for test tube animation
-  useEffect(() => {
-    const newBubbles = Array.from({ length: 8 }, (_, i) => ({
-      id: i,
-      x: 20 + Math.random() * 60,
-      size: 4 + Math.random() * 8,
-      delay: Math.random() * 2
-    }))
-    setBubbles(newBubbles)
-  }, [selectedAtoms.length])
-
-  // Get atom counts
   const atomCounts = useMemo(() => {
     const counts: Record<string, number> = {}
-    selectedAtoms.forEach(atom => {
-      counts[atom] = (counts[atom] || 0) + 1
-    })
+    selectedAtoms.forEach(a => { counts[a] = (counts[a] || 0) + 1 })
     return counts
   }, [selectedAtoms])
 
-  // Check for potential compound match (preview)
-  const potentialCompound = useMemo((): Compound | null => {
-    if (selectedAtoms.length === 0) return null
-    
-    // Check exact match first
-    const exactMatch = COMPOUNDS.find(c => {
-      const keys1 = Object.keys(c.atoms).sort()
-      const keys2 = Object.keys(atomCounts).sort()
-      if (keys1.length !== keys2.length) return false
-      return keys1.every(key => c.atoms[key] === atomCounts[key])
-    })
-    if (exactMatch) return exactMatch
+  const uniqueElements = Object.keys(atomCounts)
+  const exactMatch = useMemo(() => COMPOUNDS.find(c => {
+    const k1 = Object.keys(c.atoms).sort(), k2 = Object.keys(atomCounts).sort()
+    if (k1.length !== k2.length) return false
+    return k1.every(k => c.atoms[k] === atomCounts[k])
+  }), [atomCounts])
 
-    // Check partial match (could become a compound)
-    const partialMatch = COMPOUNDS.find(c => {
-      return Object.entries(atomCounts).every(([atom, count]) => {
-        return c.atoms[atom] !== undefined && c.atoms[atom] >= count
-      })
-    })
-    return partialMatch || null
-  }, [selectedAtoms, atomCounts])
+  // Smart predictions based on selected elements
+  const stableCompounds = useMemo(() => predictStableCompounds(uniqueElements).slice(0, 6), [uniqueElements])
+  const partialMatches = useMemo(() => findPartialMatches(atomCounts).slice(0, 3), [atomCounts])
 
-  const isExactMatch = potentialCompound && Object.keys(atomCounts).length === Object.keys(potentialCompound.atoms).length &&
-    Object.entries(atomCounts).every(([atom, count]) => potentialCompound.atoms[atom] === count)
-
-  // Handle mint success
-  useEffect(() => {
-    if (isSuccess && hash && result) {
-      setGameState('success')
-      saveMintToDatabase(result, hash)
-      onMintSuccess?.(result, hash)
-    }
-  }, [isSuccess, hash, result])
-
-  // Handle mint error
-  useEffect(() => {
-    if (error) {
-      console.error('Mint error:', error)
-      setGameState('reveal')
-    }
-  }, [error])
+  useEffect(() => { setBubbleKey(prev => prev + 1) }, [selectedAtoms.length])
+  useEffect(() => { if (isSuccess && hash && result) { setGameState('success'); saveMintToDatabase(result, hash); onMintSuccess?.(result, hash) } }, [isSuccess, hash, result])
+  useEffect(() => { if (error) setGameState('reveal') }, [error])
 
   const saveMintToDatabase = async (compound: RolledCompound, txHash: string) => {
-    try {
-      await fetch('/api/mint', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          address,
-          formula: compound.formula,
-          name: compound.name,
-          rarity: compound.rarity,
-          points: compound.points,
-          txHash,
-        })
-      })
-    } catch (err) {
-      console.error('Failed to save mint:', err)
-    }
+    try { await fetch('/api/mint', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ address, formula: compound.formula, name: compound.name, rarity: compound.rarity, points: compound.points, txHash }) }) } catch (err) { console.error(err) }
   }
 
-  const addAtom = (symbol: string) => {
-    if (selectedAtoms.length < 24 && gameState === 'idle') {
-      setSelectedAtoms([...selectedAtoms, symbol])
-    }
+  const addAtom = (symbol: string) => { if (selectedAtoms.length < 30 && gameState === 'idle') setSelectedAtoms([...selectedAtoms, symbol]) }
+  const removeAtom = (symbol: string) => {
+    if (gameState !== 'idle') return
+    const idx = selectedAtoms.lastIndexOf(symbol)
+    if (idx !== -1) setSelectedAtoms([...selectedAtoms.slice(0, idx), ...selectedAtoms.slice(idx + 1)])
   }
-
-  const removeAtom = (index: number) => {
-    if (gameState === 'idle') {
-      setSelectedAtoms(selectedAtoms.filter((_, i) => i !== index))
-    }
-  }
-
-  const removeLastAtom = () => {
-    if (gameState === 'idle' && selectedAtoms.length > 0) {
-      setSelectedAtoms(selectedAtoms.slice(0, -1))
-    }
-  }
-
-  const clearAtoms = () => {
-    setSelectedAtoms([])
-    setResult(null)
-    setGameState('idle')
-    setShowRarityReveal(false)
-    setRevealedRarity(null)
-    setIsNewDiscovery(false)
-    reset()
+  const clearAtoms = () => { setSelectedAtoms([]); setResult(null); setGameState('idle'); setShowRarityReveal(false); setRevealedRarity(null); setIsNewDiscovery(false); reset() }
+  const quickFill = (atoms: Record<string, number>) => {
+    if (gameState !== 'idle') return
+    const arr: string[] = []
+    Object.entries(atoms).forEach(([s, c]) => { for (let i = 0; i < c; i++) arr.push(s) })
+    setSelectedAtoms(arr)
   }
 
   const handleReact = () => {
     if (selectedAtoms.length === 0) return
-    
     setGameState('reacting')
-    
     setTimeout(() => {
       const compound = checkCompound(selectedAtoms)
       setResult(compound)
-      
       if (compound) {
-        const isNew = !recentDiscoveries.includes(compound.formula)
-        setIsNewDiscovery(isNew)
+        setIsNewDiscovery(!recentDiscoveries.includes(compound.formula))
         setGameState('reveal')
         animateRarityReveal(compound.rarity)
         onReaction(true, compound)
@@ -190,428 +90,230 @@ export function GameArena({ points, streak, onReaction, onMintSuccess, recentDis
 
   const animateRarityReveal = (finalRarity: Rarity) => {
     setShowRarityReveal(true)
-    const rarities: Rarity[] = ['common', 'rare', 'epic', 'legendary']
-    let iterations = 0
-    const maxIterations = 15
-    
+    const rarities: Rarity[] = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic']
+    let i = 0
     const interval = setInterval(() => {
-      iterations++
-      const randomRarity = rarities[Math.floor(Math.random() * rarities.length)]
-      setRevealedRarity(randomRarity)
-      
-      if (iterations >= maxIterations) {
-        clearInterval(interval)
-        setRevealedRarity(finalRarity)
-      }
-    }, 100)
+      i++
+      setRevealedRarity(rarities[Math.floor(Math.random() * rarities.length)])
+      if (i >= 20) { clearInterval(interval); setRevealedRarity(finalRarity) }
+    }, 80)
   }
 
   const handleMint = async () => {
     if (!result || !isConnected || !address) return
-    
     setGameState('minting')
-    
-    const tokenURI = generateTokenURI(
-      result.formula,
-      result.name,
-      result.rarity,
-      result.points
-    )
-    
-    await mint(
-      result.formula,
-      result.name,
-      result.rarity,
-      result.points,
-      tokenURI
-    )
+    await mint(result.formula, result.name, result.rarity, result.points, generateTokenURI(result.formula, result.name, result.rarity, result.points))
   }
 
-  const truncateHash = (hash: string) => 
-    `${hash.slice(0, 6)}...${hash.slice(-4)}`
-
-  const streakMultiplier = getStreakMultiplier(streak)
-  const streakLabel = getStreakLabel(streak)
+  const streakMultiplier = streak >= 10 ? 1.5 : streak >= 5 ? 1.25 : streak >= 3 ? 1.1 : 1.0
+  const liquidHeight = Math.min(selectedAtoms.length * 3, 60)
+  const liquidColor = exactMatch ? RARITY_COLORS[exactMatch.rarity] : '#0A5CDD'
 
   return (
     <div className="flex flex-col h-full pb-20">
-      {/* Streak Banner */}
       {streak >= 3 && (
-        <div 
-          className="mx-4 mt-2 py-2 px-4 rounded-xl text-center text-sm font-bold animate-pulse"
-          style={{
-            background: streak >= 10 ? 'linear-gradient(90deg, #F59E0B20, #DC262620, #F59E0B20)' :
-                       streak >= 5 ? 'linear-gradient(90deg, #F59E0B20, #F59E0B10)' : '#F59E0B10',
-            color: '#F59E0B'
-          }}
-        >
-          {streakLabel} • {streakMultiplier}x BONUS
+        <div className="mx-4 mt-2 py-2 px-4 rounded-xl text-center text-sm font-bold" style={{ background: `linear-gradient(90deg, ${RARITY_COLORS.legendary}20, transparent)`, color: RARITY_COLORS.legendary }}>
+          {streak >= 10 ? '🔥 UNSTOPPABLE' : streak >= 5 ? '⚡ ON FIRE' : '✨ WARMING UP'} • {streakMultiplier}x
         </div>
       )}
 
-      {/* Main Lab Area */}
-      <div className="flex-1 p-4 overflow-auto">
-        {/* Test Tube Workspace */}
+      <div className="flex-1 p-4 overflow-auto space-y-4">
+        {/* Test Tube + Chamber */}
         <div className="bg-[#001226] border border-[#0A5CDD]/30 rounded-2xl p-4 relative overflow-hidden">
-          <div className="flex justify-between items-center mb-3">
-            <p className="text-[#6B7280] text-xs">REACTION CHAMBER</p>
-            <p className="text-[#6B7280] text-xs">{selectedAtoms.length}/24 atoms</p>
-          </div>
-          
-          {/* Test Tube SVG */}
-          <div className="flex justify-center mb-4">
-            <div className="relative">
-              <svg width="120" height="160" viewBox="0 0 120 160">
-                {/* Test tube outline */}
-                <path
-                  d="M30 10 L30 120 Q30 150 60 150 Q90 150 90 120 L90 10"
-                  fill="none"
-                  stroke="#0A5CDD"
-                  strokeWidth="3"
-                  opacity="0.5"
-                />
+          <div className="flex gap-4">
+            {/* Test Tube SVG */}
+            <div className="flex-shrink-0">
+              <svg width="60" height="140" viewBox="0 0 60 140">
+                <defs>
+                  <linearGradient id="tubeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#0A5CDD" stopOpacity="0.3" />
+                    <stop offset="50%" stopColor="#0A5CDD" stopOpacity="0.1" />
+                    <stop offset="100%" stopColor="#0A5CDD" stopOpacity="0.3" />
+                  </linearGradient>
+                  <linearGradient id="liquidGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stopColor={liquidColor} stopOpacity="0.8" />
+                    <stop offset="100%" stopColor={liquidColor} stopOpacity="0.4" />
+                  </linearGradient>
+                </defs>
                 
-                {/* Liquid fill based on atoms */}
+                {/* Tube outline */}
+                <path d="M15 8 L15 100 Q15 130 30 130 Q45 130 45 100 L45 8" fill="url(#tubeGradient)" stroke="#0A5CDD" strokeWidth="2" />
+                
+                {/* Liquid */}
                 {selectedAtoms.length > 0 && (
-                  <path
-                    d={`M32 ${130 - (selectedAtoms.length * 4)} L32 120 Q32 148 60 148 Q88 148 88 120 L88 ${130 - (selectedAtoms.length * 4)}`}
-                    fill={potentialCompound && isExactMatch ? RARITY_COLORS[potentialCompound.baseRarity] + '40' : '#0A5CDD20'}
-                    className="transition-all duration-300"
-                  >
-                    <animate
-                      attributeName="d"
-                      values={`M32 ${130 - (selectedAtoms.length * 4)} L32 120 Q32 148 60 148 Q88 148 88 120 L88 ${130 - (selectedAtoms.length * 4)};
-                               M32 ${128 - (selectedAtoms.length * 4)} L32 120 Q32 148 60 148 Q88 148 88 120 L88 ${132 - (selectedAtoms.length * 4)};
-                               M32 ${130 - (selectedAtoms.length * 4)} L32 120 Q32 148 60 148 Q88 148 88 120 L88 ${130 - (selectedAtoms.length * 4)}`}
-                      dur="2s"
-                      repeatCount="indefinite"
-                    />
+                  <path d={`M17 ${120 - liquidHeight} L17 100 Q17 128 30 128 Q43 128 43 100 L43 ${120 - liquidHeight}`} fill="url(#liquidGradient)">
+                    <animate attributeName="d" values={`M17 ${120 - liquidHeight} L17 100 Q17 128 30 128 Q43 128 43 100 L43 ${120 - liquidHeight};M17 ${118 - liquidHeight} L17 100 Q17 128 30 128 Q43 128 43 100 L43 ${122 - liquidHeight};M17 ${120 - liquidHeight} L17 100 Q17 128 30 128 Q43 128 43 100 L43 ${120 - liquidHeight}`} dur="2s" repeatCount="indefinite" />
                   </path>
                 )}
                 
                 {/* Bubbles */}
-                {selectedAtoms.length > 0 && bubbles.map(bubble => (
-                  <circle
-                    key={bubble.id}
-                    cx={bubble.x}
-                    cy="140"
-                    r={bubble.size}
-                    fill="#0A5CDD"
-                    opacity="0.3"
-                  >
-                    <animate
-                      attributeName="cy"
-                      values={`140;${40 + Math.random() * 20};140`}
-                      dur={`${2 + bubble.delay}s`}
-                      repeatCount="indefinite"
-                      begin={`${bubble.delay}s`}
-                    />
-                    <animate
-                      attributeName="opacity"
-                      values="0.3;0.6;0"
-                      dur={`${2 + bubble.delay}s`}
-                      repeatCount="indefinite"
-                      begin={`${bubble.delay}s`}
-                    />
+                {selectedAtoms.length > 0 && [0,1,2,3,4].map(i => (
+                  <circle key={`${bubbleKey}-${i}`} cx={20 + Math.random() * 20} cy="120" r={2 + Math.random() * 3} fill={liquidColor} opacity="0.6">
+                    <animate attributeName="cy" values={`120;${50 + Math.random() * 30};120`} dur={`${1.5 + Math.random()}s`} repeatCount="indefinite" begin={`${i * 0.3}s`} />
+                    <animate attributeName="opacity" values="0.6;0.8;0" dur={`${1.5 + Math.random()}s`} repeatCount="indefinite" begin={`${i * 0.3}s`} />
                   </circle>
                 ))}
                 
-                {/* Cork/top */}
-                <rect x="25" y="2" width="70" height="12" rx="3" fill="#8B4513" opacity="0.8" />
+                {/* Cork */}
+                <rect x="12" y="2" width="36" height="10" rx="3" fill="#8B4513" />
               </svg>
+            </div>
+
+            {/* Formula + Info */}
+            <div className="flex-1 min-w-0">
+              <p className="text-white text-3xl font-mono font-bold mb-2">{selectedAtoms.length > 0 ? formatFormula(atomCounts) : '—'}</p>
               
-              {/* Atom badges on tube */}
-              <div className="absolute top-16 left-1/2 -translate-x-1/2 flex flex-wrap gap-1 justify-center max-w-[80px]">
-                {Object.entries(atomCounts).map(([atom, count]) => {
-                  const atomData = ATOMS.find(a => a.symbol === atom)!
-                  return (
-                    <div
-                      key={atom}
-                      className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold"
-                      style={{ backgroundColor: atomData.bgColor, color: atomData.color }}
-                    >
-                      {atom}
-                      {count > 1 && <span className="text-[10px]">×{count}</span>}
-                    </div>
-                  )
-                })}
-              </div>
+              {exactMatch ? (
+                <div>
+                  <p className="text-[#22C55E] font-bold">{exactMatch.name}</p>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <span className="text-sm px-2 py-0.5 rounded-full" style={{ backgroundColor: RARITY_COLORS[exactMatch.rarity] + '30', color: RARITY_COLORS[exactMatch.rarity] }}>
+                      {getRarityIcon(exactMatch.rarity)} {RARITY_LABELS[exactMatch.rarity]}
+                    </span>
+                    <span className="text-[#0A5CDD] font-bold text-sm">{exactMatch.points} pts</span>
+                  </div>
+                  <p className="text-[#6B7280] text-xs mt-2">{exactMatch.description}</p>
+                </div>
+              ) : selectedAtoms.length > 0 ? (
+                <p className="text-[#DC2626] text-sm">Unknown compound</p>
+              ) : (
+                <p className="text-[#6B7280] text-sm">Select elements to build</p>
+              )}
+
+              {/* Selected atom pills */}
+              {Object.keys(atomCounts).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  {Object.entries(atomCounts).map(([symbol, count]) => {
+                    const atom = ATOMS.find(a => a.symbol === symbol)!
+                    return (
+                      <button key={symbol} onClick={() => removeAtom(symbol)} disabled={gameState !== 'idle'} className="flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold transition-all hover:opacity-80" style={{ backgroundColor: atom.bg, color: atom.text }}>
+                        {symbol}{count > 1 && <span>×{count}</span>}
+                        {gameState === 'idle' && <span className="ml-0.5 opacity-70">×</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Formula Display */}
-          <div className="text-center mb-2">
-            <p className="text-white text-3xl font-mono font-bold tracking-wider">
-              {selectedAtoms.length > 0 ? formatFormula(atomCounts) : '—'}
-            </p>
-          </div>
-
-          {/* Compound Preview/Hint */}
-          <div className="text-center min-h-[40px]">
-            {selectedAtoms.length === 0 ? (
-              <p className="text-[#4B5563] text-sm">Add atoms to start building</p>
-            ) : isExactMatch && potentialCompound ? (
-              <div className="animate-pulse">
-                <p className="text-[#22C55E] font-medium">{potentialCompound.name}</p>
-                <p className="text-[#6B7280] text-xs">Ready to react! 🧪</p>
-              </div>
-            ) : potentialCompound ? (
-              <div>
-                <p className="text-[#6B7280] text-sm">Building towards...</p>
-                <p className="text-[#0A5CDD] text-sm font-medium">{potentialCompound.name}?</p>
-              </div>
-            ) : (
-              <p className="text-[#DC2626] text-sm">Unknown combination</p>
-            )}
-          </div>
-
-          {/* Reacting Overlay */}
+          {/* Overlays */}
           {gameState === 'reacting' && (
             <div className="absolute inset-0 bg-[#000814]/95 rounded-2xl flex flex-col items-center justify-center z-10">
-              <img 
-                src={MIXING_GIF} 
-                alt="Mixing..." 
-                className="w-40 h-40 object-cover rounded-xl mb-4"
-              />
-              <p className="text-[#0A5CDD] animate-pulse font-bold text-lg">Reacting...</p>
-              <p className="text-[#6B7280] text-sm mt-1">Molecules combining</p>
+              <img src={MIXING_GIF} className="w-24 h-24 object-cover rounded-xl mb-3" alt="Mixing" />
+              <p className="text-[#0A5CDD] animate-pulse font-bold">Reacting...</p>
             </div>
           )}
 
-          {/* Rarity Reveal Overlay */}
           {(gameState === 'reveal' || gameState === 'minting' || gameState === 'success') && result && showRarityReveal && (
             <div className="absolute inset-0 bg-[#000814]/95 rounded-2xl flex flex-col items-center justify-center z-10">
-              {/* New Discovery Badge */}
-              {isNewDiscovery && gameState === 'reveal' && (
-                <div className="absolute top-4 right-4 bg-[#22C55E] text-white text-xs font-bold px-3 py-1 rounded-full animate-bounce">
-                  ✨ NEW DISCOVERY!
-                </div>
-              )}
-              
-              <div 
-                className="text-7xl mb-4 transition-all duration-100"
-                style={{ 
-                  filter: revealedRarity === result.rarity ? `drop-shadow(${RARITY_GLOW[revealedRarity]})` : 'none',
-                  transform: gameState === 'reveal' && revealedRarity !== result.rarity ? 'scale(1.2) rotate(5deg)' : 'scale(1)'
-                }}
-              >
-                {revealedRarity === 'legendary' ? '👑' : 
-                 revealedRarity === 'epic' ? '🔮' : 
-                 revealedRarity === 'rare' ? '💎' : '⚗️'}
-              </div>
-              
-              <p 
-                className="text-3xl font-black mb-2 transition-colors duration-100 tracking-wider"
-                style={{ color: revealedRarity ? RARITY_COLORS[revealedRarity] : '#fff' }}
-              >
-                {revealedRarity?.toUpperCase()}
-              </p>
-              
-              <p className="text-white text-2xl font-bold mb-1">{result.name}</p>
-              <p className="text-[#6B7280] font-mono">{result.formula}</p>
-              
-              {revealedRarity === result.rarity && (
-                <div className="mt-4 text-center">
-                  <p 
-                    className="text-2xl font-black animate-bounce"
-                    style={{ color: RARITY_COLORS[result.rarity] }}
-                  >
-                    +{Math.floor(result.points * streakMultiplier)} pts
-                  </p>
-                  {streakMultiplier > 1 && (
-                    <p className="text-[#F59E0B] text-sm">
-                      ({result.points} × {streakMultiplier} streak bonus)
-                    </p>
-                  )}
-                </div>
-              )}
+              {isNewDiscovery && gameState === 'reveal' && <div className="absolute top-3 right-3 bg-[#22C55E] text-white text-xs font-bold px-2 py-1 rounded-full animate-bounce">✨ NEW!</div>}
+              <div className="text-5xl mb-2" style={{ filter: revealedRarity === result.rarity ? `drop-shadow(${RARITY_GLOW[revealedRarity]})` : 'none' }}>{getRarityIcon(revealedRarity || 'common')}</div>
+              <p className="text-xl font-black" style={{ color: revealedRarity ? RARITY_COLORS[revealedRarity] : '#fff' }}>{RARITY_LABELS[revealedRarity || 'common']}</p>
+              <p className="text-white text-lg font-bold mt-1">{result.name}</p>
+              <p className="text-[#6B7280] font-mono text-sm">{result.formula}</p>
+              {revealedRarity === result.rarity && <p className="text-lg font-black mt-2 animate-bounce" style={{ color: RARITY_COLORS[result.rarity] }}>+{Math.floor(result.points * streakMultiplier)} pts</p>}
             </div>
           )}
 
-          {/* Failed Overlay */}
           {gameState === 'failed' && (
             <div className="absolute inset-0 bg-[#000814]/95 rounded-2xl flex flex-col items-center justify-center z-10">
-              <div className="text-7xl mb-4 animate-pulse">💨</div>
-              <p className="text-[#DC2626] font-bold text-2xl">Reaction Failed!</p>
-              <p className="text-[#6B7280] text-sm mt-2">Unknown compound</p>
-              <p className="text-[#4B5563] text-xs mt-4">💡 Tip: Try H₂O or NaCl</p>
+              <div className="text-5xl mb-2">💨</div>
+              <p className="text-[#DC2626] font-bold text-lg">No stable compound!</p>
+              <p className="text-[#6B7280] text-xs mt-1">Try a different combination</p>
             </div>
           )}
         </div>
 
-        {/* Quick Suggestions */}
+        {/* Smart Predictions */}
+        {gameState === 'idle' && uniqueElements.length > 0 && !exactMatch && (
+          <div className="bg-[#001226]/50 border border-[#0A5CDD]/20 rounded-xl p-3">
+            <p className="text-[#6B7280] text-xs mb-2 flex items-center gap-1">
+              <span>🧠</span> STABLE COMPOUNDS WITH {uniqueElements.join(' + ')}
+            </p>
+            {stableCompounds.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {stableCompounds.map(c => (
+                  <button key={c.formula} onClick={() => quickFill(c.atoms)} className="flex items-center gap-1.5 px-2.5 py-1.5 bg-[#0A0A0A] border border-[#1F2937] rounded-lg hover:border-[#0A5CDD] transition-colors">
+                    <span className="text-white text-sm font-mono">{c.formula}</span>
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: RARITY_COLORS[c.rarity] }} />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[#DC2626] text-xs">No known stable compounds with only these elements</p>
+            )}
+          </div>
+        )}
+
+        {/* Partial matches */}
+        {gameState === 'idle' && partialMatches.length > 0 && !exactMatch && selectedAtoms.length > 0 && (
+          <div className="bg-[#001226]/50 border border-[#0A5CDD]/20 rounded-xl p-3">
+            <p className="text-[#6B7280] text-xs mb-2">💡 BUILDING TOWARDS</p>
+            <div className="flex flex-wrap gap-2">
+              {partialMatches.map(c => {
+                const totalNeeded = Object.values(c.atoms).reduce((a, b) => a + b, 0)
+                const totalHave = Object.entries(atomCounts).reduce((s, [a, n]) => s + Math.min(n, c.atoms[a] || 0), 0)
+                const pct = Math.round((totalHave / totalNeeded) * 100)
+                return (
+                  <button key={c.formula} onClick={() => quickFill(c.atoms)} className="flex items-center gap-2 px-2.5 py-1.5 bg-[#0A0A0A] border border-[#1F2937] rounded-lg hover:border-[#0A5CDD]">
+                    <span className="text-white text-sm font-mono">{c.formula}</span>
+                    <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: RARITY_COLORS[c.rarity] + '30', color: RARITY_COLORS[c.rarity] }}>{pct}%</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Quick Start */}
         {gameState === 'idle' && selectedAtoms.length === 0 && (
-          <div className="mt-4">
-            <p className="text-[#6B7280] text-xs mb-2 text-center">QUICK START</p>
+          <div className="text-center">
+            <p className="text-[#6B7280] text-xs mb-2">QUICK START</p>
             <div className="flex gap-2 justify-center flex-wrap">
-              {[
-                { formula: 'H₂O', atoms: ['H', 'H', 'O'], name: 'Water' },
-                { formula: 'NaCl', atoms: ['Na', 'Cl'], name: 'Salt' },
-                { formula: 'CO₂', atoms: ['C', 'O', 'O'], name: 'CO₂' },
-              ].map(suggestion => (
-                <button
-                  key={suggestion.formula}
-                  onClick={() => setSelectedAtoms(suggestion.atoms)}
-                  className="bg-[#001226] border border-[#0A5CDD]/30 rounded-lg px-3 py-2 text-sm hover:border-[#0A5CDD] transition-colors"
-                >
-                  <span className="text-white font-mono">{suggestion.formula}</span>
-                  <span className="text-[#6B7280] text-xs ml-2">{suggestion.name}</span>
+              {[{ f: 'H₂O', a: { H: 2, O: 1 } }, { f: 'NaCl', a: { Na: 1, Cl: 1 } }, { f: 'CO₂', a: { C: 1, O: 2 } }, { f: 'AuCl₃', a: { Au: 1, Cl: 3 } }].map(q => (
+                <button key={q.f} onClick={() => quickFill(q.a)} className="px-3 py-2 bg-[#001226] border border-[#0A5CDD]/30 rounded-lg hover:border-[#0A5CDD]">
+                  <span className="text-white font-mono text-sm">{q.f}</span>
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        {/* Success Card */}
+        {/* Success */}
         {gameState === 'success' && result && hash && (
-          <div 
-            className="mt-4 p-4 rounded-xl text-center border"
-            style={{ 
-              backgroundColor: `${RARITY_COLORS[result.rarity]}15`,
-              borderColor: `${RARITY_COLORS[result.rarity]}50`
-            }}
-          >
-            <div className="text-5xl mb-2">🎉</div>
-            <p className="text-white font-bold text-xl">NFT Minted!</p>
-            <p 
-              className="text-sm mt-1 font-medium"
-              style={{ color: RARITY_COLORS[result.rarity] }}
-            >
-              {result.rarity.toUpperCase()} {result.name}
-            </p>
-            <a
-              href={`https://basescan.org/tx/${hash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-block mt-3 bg-[#0A5CDD] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#0A5CDD]/80 transition-colors"
-            >
-              View on BaseScan ↗
-            </a>
+          <div className="p-4 rounded-xl text-center border" style={{ backgroundColor: `${RARITY_COLORS[result.rarity]}15`, borderColor: `${RARITY_COLORS[result.rarity]}50` }}>
+            <div className="text-4xl mb-2">🎉</div>
+            <p className="text-white font-bold text-lg">NFT Minted!</p>
+            <a href={`https://basescan.org/tx/${hash}`} target="_blank" className="inline-block mt-3 bg-[#0A5CDD] text-white px-4 py-2 rounded-lg text-sm font-medium">View on BaseScan ↗</a>
           </div>
         )}
 
-        {/* Minting Status */}
         {gameState === 'minting' && (
-          <div className="mt-4 p-4 rounded-xl text-center bg-[#0A5CDD]/20 border border-[#0A5CDD]/50">
-            <div className="text-3xl mb-2 animate-spin">⚛️</div>
-            <p className="text-[#0A5CDD] font-medium">
-              {isPending ? 'Confirm in wallet...' : isConfirming ? 'Confirming on Base...' : 'Processing...'}
-            </p>
-          </div>
-        )}
-
-        {/* Error Display */}
-        {error && gameState === 'reveal' && (
-          <div className="mt-4 p-3 rounded-xl text-center bg-[#DC2626]/20 border border-[#DC2626]/50">
-            <p className="text-[#DC2626] text-sm">
-              {error.message.includes('rejected') ? 'Transaction rejected' : 'Mint failed. Try again.'}
-            </p>
+          <div className="p-4 rounded-xl text-center bg-[#0A5CDD]/20 border border-[#0A5CDD]/50">
+            <div className="text-2xl mb-2 animate-spin">⚛️</div>
+            <p className="text-[#0A5CDD] font-medium">{isPending ? 'Confirm in wallet...' : 'Confirming...'}</p>
           </div>
         )}
       </div>
 
-      {/* Atom Palette */}
-      <div className="px-4 pb-3">
-        <div className="bg-[#001226] border border-[#0A5CDD]/30 rounded-2xl p-4">
-          <div className="flex justify-between items-center mb-3">
-            <p className="text-[#6B7280] text-xs">ELEMENTS</p>
-            {selectedAtoms.length > 0 && (
-              <button
-                onClick={removeLastAtom}
-                className="text-[#6B7280] text-xs hover:text-white transition-colors"
-              >
-                ⌫ Undo
-              </button>
-            )}
-          </div>
-          <div className="flex justify-center gap-2 flex-wrap">
-            {ATOMS.map(atom => {
-              const count = atomCounts[atom.symbol] || 0
-              return (
-                <button
-                  key={atom.symbol}
-                  onClick={() => addAtom(atom.symbol)}
-                  disabled={gameState !== 'idle' || selectedAtoms.length >= 24}
-                  className="relative w-14 h-14 rounded-full flex flex-col items-center justify-center font-bold shadow-lg transition-all active:scale-90 hover:scale-110 disabled:opacity-40 disabled:hover:scale-100"
-                  style={{ 
-                    backgroundColor: atom.bgColor, 
-                    color: atom.color, 
-                    boxShadow: `0 4px 15px ${atom.bgColor}40` 
-                  }}
-                >
-                  <span className="text-lg">{atom.symbol}</span>
-                  {count > 0 && (
-                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-[#0A5CDD] text-white text-xs rounded-full flex items-center justify-center font-bold">
-                      {count}
-                    </span>
-                  )}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Action Buttons */}
-      <div className="px-4 pb-4 flex gap-3">
-        <button 
-          onClick={clearAtoms} 
-          disabled={selectedAtoms.length === 0 && gameState === 'idle'}
-          className="flex-1 bg-[#1F2937] text-white py-3 rounded-xl font-medium text-sm border border-[#374151] active:scale-95 transition-all disabled:opacity-50"
-        >
-          🗑 Clear
-        </button>
+      {/* Bottom Controls */}
+      <div className="px-4 pb-4 space-y-3">
+        <ElementPicker onSelectAtom={addAtom} selectedCounts={atomCounts} disabled={gameState !== 'idle'} />
         
-        {gameState === 'idle' && (
-          <button
-            onClick={handleReact}
-            disabled={selectedAtoms.length === 0}
-            className={`flex-[2] py-3 rounded-xl font-bold text-lg shadow-lg active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-              isExactMatch 
-                ? 'bg-gradient-to-r from-[#22C55E] to-[#16A34A] shadow-[#22C55E]/30' 
-                : 'bg-gradient-to-r from-[#0A5CDD] to-[#2563EB] shadow-[#0A5CDD]/30'
-            } text-white`}
-          >
-            {isExactMatch ? '✨ REACT!' : '🔥 REACT!'}
-          </button>
-        )}
-
-        {gameState === 'reveal' && result && (
-          <button
-            onClick={handleMint}
-            disabled={!isConnected}
-            className="flex-[2] bg-gradient-to-r from-[#22C55E] to-[#16A34A] text-white py-3 rounded-xl font-bold text-lg shadow-lg shadow-[#22C55E]/30 active:scale-95 transition-all disabled:opacity-50"
-          >
-            {isConnected ? '🎉 MINT NFT' : '🔗 Connect Wallet'}
-          </button>
-        )}
-
-        {gameState === 'failed' && (
-          <button
-            onClick={clearAtoms}
-            className="flex-[2] bg-gradient-to-r from-[#0A5CDD] to-[#2563EB] text-white py-3 rounded-xl font-bold text-lg shadow-lg shadow-[#0A5CDD]/30 active:scale-95 transition-all"
-          >
-            🔄 Try Again
-          </button>
-        )}
-
-        {gameState === 'success' && (
-          <button
-            onClick={clearAtoms}
-            className="flex-[2] bg-gradient-to-r from-[#0A5CDD] to-[#2563EB] text-white py-3 rounded-xl font-bold text-lg shadow-lg shadow-[#0A5CDD]/30 active:scale-95 transition-all"
-          >
-            🧪 New Reaction
-          </button>
-        )}
-
-        {(gameState === 'reacting' || gameState === 'minting') && (
-          <button
-            disabled
-            className="flex-[2] bg-[#374151] text-white py-3 rounded-xl font-bold text-lg opacity-70 cursor-not-allowed"
-          >
-            {gameState === 'reacting' ? '⚛️ Mixing...' : '⏳ Minting...'}
-          </button>
-        )}
+        <div className="flex gap-3">
+          <button onClick={clearAtoms} disabled={selectedAtoms.length === 0 && gameState === 'idle'} className="flex-1 bg-[#1F2937] text-white py-3.5 rounded-xl font-medium border border-[#374151] active:scale-95 disabled:opacity-50">🗑 Clear</button>
+          
+          {gameState === 'idle' && (
+            <button onClick={handleReact} disabled={selectedAtoms.length === 0} className={`flex-[2] py-3.5 rounded-xl font-bold text-lg shadow-lg active:scale-95 disabled:opacity-50 ${exactMatch ? 'bg-gradient-to-r from-[#22C55E] to-[#16A34A]' : 'bg-gradient-to-r from-[#0A5CDD] to-[#2563EB]'} text-white`}>
+              {exactMatch ? '✨ REACT!' : '🔥 REACT!'}
+            </button>
+          )}
+          {gameState === 'reveal' && result && <button onClick={handleMint} disabled={!isConnected} className="flex-[2] bg-gradient-to-r from-[#22C55E] to-[#16A34A] text-white py-3.5 rounded-xl font-bold text-lg active:scale-95 disabled:opacity-50">{isConnected ? '🎉 MINT NFT' : '🔗 Connect'}</button>}
+          {gameState === 'failed' && <button onClick={clearAtoms} className="flex-[2] bg-gradient-to-r from-[#0A5CDD] to-[#2563EB] text-white py-3.5 rounded-xl font-bold text-lg">🔄 Try Again</button>}
+          {gameState === 'success' && <button onClick={clearAtoms} className="flex-[2] bg-gradient-to-r from-[#0A5CDD] to-[#2563EB] text-white py-3.5 rounded-xl font-bold text-lg">🧪 New Reaction</button>}
+          {(gameState === 'reacting' || gameState === 'minting') && <button disabled className="flex-[2] bg-[#374151] text-white py-3.5 rounded-xl font-bold text-lg opacity-70">{gameState === 'reacting' ? '⚛️ Mixing...' : '⏳ Minting...'}</button>}
+        </div>
       </div>
     </div>
   )
