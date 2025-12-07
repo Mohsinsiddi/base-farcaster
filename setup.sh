@@ -1,446 +1,292 @@
 #!/bin/bash
 
-mkdir -p lib/hooks
-mkdir -p app/api/game
-mkdir -p app/api/leaderboard
-mkdir -p app/api/user
+# ═══════════════════════════════════════════════════════════════════════════════
+# 🧪 Chain Reaction Labs - Complete Setup with Header
+# ═══════════════════════════════════════════════════════════════════════════════
 
-cat > lib/mongodb.ts << 'EOF'
-import { MongoClient, Db } from 'mongodb'
+echo "🧪 Setting up Chain Reaction Labs..."
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017'
-const DB_NAME = 'chain-reaction'
+# ═══════════════════════════════════════════════════════════════════════════════
+# 1. CREATE HEADER COMPONENT
+# ═══════════════════════════════════════════════════════════════════════════════
 
-let cachedClient: MongoClient | null = null
-let cachedDb: Db | null = null
+cat > components/game/Header.tsx << 'EOF'
+'use client'
 
-export async function connectToDatabase() {
-  if (cachedClient && cachedDb) return { client: cachedClient, db: cachedDb }
+import { useAccount, useConnect, useDisconnect } from 'wagmi'
+import { useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 
-  const client = await MongoClient.connect(MONGODB_URI)
-  const db = client.db(DB_NAME)
-
-  cachedClient = client
-  cachedDb = db
-
-  return { client, db }
+interface HeaderProps {
+  points: number
+  streak: number
+  level: number
 }
 
-// Collections
-export async function getUsersCollection() {
-  const { db } = await connectToDatabase()
-  return db.collection('users')
-}
+export function Header({ points, streak, level }: HeaderProps) {
+  const { address, isConnected } = useAccount()
+  const { connect, connectors } = useConnect()
+  const { disconnect } = useDisconnect()
+  const [showDropdown, setShowDropdown] = useState(false)
+  
+  const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
-export async function getDiscoveriesCollection() {
-  const { db } = await connectToDatabase()
-  return db.collection('discoveries')
-}
+  const handleConnect = () => {
+    if (connectors.length > 0) {
+      connect({ connector: connectors[0] })
+    }
+  }
 
-export async function getLeaderboardCollection() {
-  const { db } = await connectToDatabase()
-  return db.collection('leaderboard')
+  return (
+    <header className="bg-gradient-to-r from-[#000814] via-[#001528] to-[#000814] border-b border-[#0A5CDD]/30 px-4 py-3">
+      <div className="flex items-center justify-between">
+        {/* Logo */}
+        <div className="flex items-center gap-2">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#0A5CDD] to-[#2563EB] flex items-center justify-center shadow-lg shadow-[#0A5CDD]/30">
+            <span className="text-xl">⚗️</span>
+          </div>
+          <div>
+            <h1 className="text-white font-bold text-sm leading-tight">Chain Reaction</h1>
+            <p className="text-[#0A5CDD] text-[10px] font-medium tracking-wider">LABS</p>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="flex items-center gap-2">
+          {/* Streak */}
+          <div className="flex items-center gap-1 bg-[#1F2937]/80 px-2 py-1.5 rounded-lg">
+            <span className="text-orange-400 text-sm">🔥</span>
+            <span className="text-white text-xs font-bold">{streak}</span>
+          </div>
+          
+          {/* Points */}
+          <div className="flex items-center gap-1 bg-[#1F2937]/80 px-2 py-1.5 rounded-lg">
+            <span className="text-yellow-400 text-sm">⭐</span>
+            <span className="text-white text-xs font-bold">{points.toLocaleString()}</span>
+          </div>
+          
+          {/* Level */}
+          <div className="flex items-center gap-1 bg-gradient-to-r from-[#0A5CDD]/20 to-[#2563EB]/20 border border-[#0A5CDD]/50 px-2 py-1.5 rounded-lg">
+            <span className="text-sm">🎖️</span>
+            <span className="text-[#0A5CDD] text-xs font-bold">Lv.{level}</span>
+          </div>
+
+          {/* Wallet */}
+          <div className="relative">
+            {isConnected && address ? (
+              <button
+                onClick={() => setShowDropdown(!showDropdown)}
+                className="flex items-center gap-1.5 bg-[#22C55E]/20 border border-[#22C55E]/50 px-2 py-1.5 rounded-lg"
+              >
+                <div className="w-1.5 h-1.5 rounded-full bg-[#22C55E] animate-pulse" />
+                <span className="text-[#22C55E] text-xs font-medium">{formatAddress(address)}</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleConnect}
+                className="flex items-center gap-1 bg-[#0A5CDD] px-3 py-1.5 rounded-lg"
+              >
+                <span className="text-white text-xs font-medium">Connect</span>
+              </button>
+            )}
+
+            {/* Dropdown */}
+            <AnimatePresence>
+              {showDropdown && isConnected && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="absolute right-0 top-full mt-2 w-48 bg-[#1F2937] border border-[#374151] rounded-xl shadow-xl z-50 overflow-hidden"
+                >
+                  <div className="p-3 border-b border-[#374151]">
+                    <p className="text-[#6B7280] text-[10px] uppercase tracking-wider mb-1">Connected Wallet</p>
+                    <p className="text-white text-xs font-mono">{address}</p>
+                  </div>
+                  <div className="p-2">
+                    <div className="flex items-center justify-between px-2 py-1.5">
+                      <span className="text-[#6B7280] text-xs">Level</span>
+                      <span className="text-white text-xs font-bold">🎖️ {level}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-2 py-1.5">
+                      <span className="text-[#6B7280] text-xs">Points</span>
+                      <span className="text-white text-xs font-bold">⭐ {points.toLocaleString()}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      disconnect()
+                      setShowDropdown(false)
+                    }}
+                    className="w-full p-2 text-[#DC2626] text-xs font-medium hover:bg-[#DC2626]/10 border-t border-[#374151]"
+                  >
+                    Disconnect
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </div>
+      </div>
+    </header>
+  )
 }
 EOF
 
-cat > lib/hooks/useContract.ts << 'EOF'
-import { useWriteContract, useReadContract, useWaitForTransactionReceipt } from 'wagmi'
-import { base } from 'viem/chains'
+echo "✅ Created components/game/Header.tsx"
 
-export const MOLECULE_NFT_ADDRESS = "0x1234567890123456789012345678901234567890" as const
+# ═══════════════════════════════════════════════════════════════════════════════
+# 2. UPDATE GAME INDEX EXPORTS
+# ═══════════════════════════════════════════════════════════════════════════════
 
-export const MOLECULE_NFT_ABI = [
-  {
-    inputs: [
-      { name: "to", type: "address" },
-      { name: "formula", type: "string" },
-      { name: "name", type: "string" },
-      { name: "rarity", type: "string" },
-      { name: "points", type: "uint256" },
-      { name: "tokenURI_", type: "string" }
-    ],
-    name: "mint",
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "nonpayable",
-    type: "function"
-  },
-  {
-    inputs: [{ name: "tokenId", type: "uint256" }],
-    name: "getMolecule",
-    outputs: [
-      {
-        components: [
-          { name: "formula", type: "string" },
-          { name: "name", type: "string" },
-          { name: "rarity", type: "string" },
-          { name: "points", type: "uint256" },
-          { name: "mintedAt", type: "uint256" }
-        ],
-        type: "tuple"
-      }
-    ],
-    stateMutability: "view",
-    type: "function"
-  },
-  {
-    inputs: [{ name: "user", type: "address" }],
-    name: "getUserTokens",
-    outputs: [{ name: "", type: "uint256[]" }],
-    stateMutability: "view",
-    type: "function"
-  },
-  {
-    inputs: [],
-    name: "totalSupply",
-    outputs: [{ name: "", type: "uint256" }],
-    stateMutability: "view",
-    type: "function"
-  }
-] as const
-
-// Mint NFT Hook
-export function useMintMolecule() {
-  const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash })
-
-  const mint = async (
-    to: `0x${string}`,
-    formula: string,
-    name: string,
-    rarity: string,
-    points: number,
-    tokenURI: string
-  ) => {
-    writeContract({
-      address: MOLECULE_NFT_ADDRESS,
-      abi: MOLECULE_NFT_ABI,
-      functionName: 'mint',
-      args: [to, formula, name, rarity, BigInt(points), tokenURI],
-      chain: base,
-    })
-  }
-
-  return { mint, hash, isPending, isConfirming, isSuccess, error }
-}
-
-// Get User Tokens Hook
-export function useUserTokens(address: `0x${string}` | undefined) {
-  return useReadContract({
-    address: MOLECULE_NFT_ADDRESS,
-    abi: MOLECULE_NFT_ABI,
-    functionName: 'getUserTokens',
-    args: address ? [address] : undefined,
-    query: { enabled: !!address }
-  })
-}
-
-// Get Molecule Data Hook
-export function useMolecule(tokenId: bigint | undefined) {
-  return useReadContract({
-    address: MOLECULE_NFT_ADDRESS,
-    abi: MOLECULE_NFT_ABI,
-    functionName: 'getMolecule',
-    args: tokenId !== undefined ? [tokenId] : undefined,
-    query: { enabled: tokenId !== undefined }
-  })
-}
-
-// Get Total Supply Hook
-export function useTotalSupply() {
-  return useReadContract({
-    address: MOLECULE_NFT_ADDRESS,
-    abi: MOLECULE_NFT_ABI,
-    functionName: 'totalSupply',
-  })
-}
+cat > components/game/index.ts << 'EOF'
+export { SplashScreen } from './SplashScreen'
+export { Navbar } from './Navbar'
+export { GameArena } from './GameArena'
+export { Profile } from './Profile'
+export { Header } from './Header'
 EOF
 
-cat > lib/api.ts << 'EOF'
-const API_BASE = '/api'
+echo "✅ Updated components/game/index.ts"
 
-// User API
-export async function getUser(address: string) {
-  const res = await fetch(`${API_BASE}/user?address=${address}`)
-  return res.json()
-}
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3. UPDATE APP.TSX WITH HEADER
+# ═══════════════════════════════════════════════════════════════════════════════
 
-export async function createOrUpdateUser(address: string, fid?: number, username?: string) {
-  const res = await fetch(`${API_BASE}/user`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, fid, username })
-  })
-  return res.json()
-}
+cat > components/pages/app.tsx << 'EOF'
+'use client'
 
-// Game API
-export async function recordDiscovery(
-  address: string,
-  formula: string,
-  name: string,
-  rarity: string,
-  points: number,
-  tokenId?: number
-) {
-  const res = await fetch(`${API_BASE}/game/discover`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ address, formula, name, rarity, points, tokenId })
-  })
-  return res.json()
-}
+import { useState, useEffect } from 'react'
+import { SafeAreaContainer } from '@/components/safe-area-container'
+import { SplashScreen, Navbar, GameArena, Profile, Header } from '@/components/game'
 
-export async function getUserDiscoveries(address: string) {
-  const res = await fetch(`${API_BASE}/game/discoveries?address=${address}`)
-  return res.json()
-}
+type Screen = 'splash' | 'lab' | 'ranks' | 'profile'
 
-// Leaderboard API
-export async function getLeaderboard(limit = 20) {
-  const res = await fetch(`${API_BASE}/leaderboard?limit=${limit}`)
-  return res.json()
-}
+// Try to use Farcaster SDK, fallback to local mode
+function useFarcasterOrLocal() {
+  const [context, setContext] = useState<any>(undefined)
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSDKLoaded, setIsSDKLoaded] = useState(false)
 
-export async function getUserRank(address: string) {
-  const res = await fetch(`${API_BASE}/leaderboard/rank?address=${address}`)
-  return res.json()
-}
-EOF
-
-cat > app/api/user/route.ts << 'EOF'
-import { NextRequest, NextResponse } from 'next/server'
-import { getUsersCollection } from '@/lib/mongodb'
-
-export async function GET(req: NextRequest) {
-  try {
-    const address = req.nextUrl.searchParams.get('address')
-    if (!address) return NextResponse.json({ error: 'Address required' }, { status: 400 })
-
-    const users = await getUsersCollection()
-    const user = await users.findOne({ address: address.toLowerCase() })
-
-    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
-    return NextResponse.json(user)
-  } catch (error) {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const { address, fid, username } = await req.json()
-    if (!address) return NextResponse.json({ error: 'Address required' }, { status: 400 })
-
-    const users = await getUsersCollection()
-    const now = new Date()
-
-    const result = await users.updateOne(
-      { address: address.toLowerCase() },
-      {
-        $set: { fid, username, updatedAt: now },
-        $setOnInsert: { 
-          address: address.toLowerCase(),
-          points: 0,
-          streak: 0,
-          discoveries: [],
-          badges: [],
-          createdAt: now
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const sdk = (await import('@farcaster/miniapp-sdk')).default
+        const ctx = await sdk.context
+        
+        if (ctx) {
+          setContext(ctx)
+          setIsSDKLoaded(true)
+          await sdk.actions.ready()
+        } else {
+          setIsSDKLoaded(true)
         }
-      },
-      { upsert: true }
+      } catch (e) {
+        console.log('Running in local mode')
+        setIsSDKLoaded(true)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    init()
+  }, [])
+
+  return { context, isLoading, isSDKLoaded }
+}
+
+export default function App() {
+  const { context, isLoading, isSDKLoaded } = useFarcasterOrLocal()
+  const [screen, setScreen] = useState<Screen>('splash')
+  const [points, setPoints] = useState(1250)
+  const [streak, setStreak] = useState(0)
+  const [discoveries, setDiscoveries] = useState<any[]>([])
+  const [earnedBadges, setEarnedBadges] = useState<string[]>(['first'])
+
+  // Calculate level from points
+  const level = Math.floor(points / 500) + 1
+
+  const handleSplashComplete = () => setScreen('lab')
+
+  const handleReaction = (success: boolean, compound: any) => {
+    if (success && compound) {
+      setPoints(prev => prev + compound.points)
+      setStreak(prev => prev + 1)
+      if (!discoveries.find(d => d.formula === compound.formula)) {
+        setDiscoveries(prev => [...prev, compound])
+        if (discoveries.length === 0) setEarnedBadges(prev => [...prev, 'first'])
+        if (discoveries.length + 1 >= 5) setEarnedBadges(prev => [...prev, 'chemist'])
+      }
+    } else {
+      setStreak(0)
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <SafeAreaContainer insets={context?.client?.safeAreaInsets}>
+        <div className="flex min-h-screen flex-col items-center justify-center bg-[#000814]">
+          <div className="text-2xl text-white">Loading...</div>
+        </div>
+      </SafeAreaContainer>
     )
-
-    const user = await users.findOne({ address: address.toLowerCase() })
-    return NextResponse.json(user)
-  } catch (error) {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
-}
-EOF
 
-cat > app/api/game/discover/route.ts << 'EOF'
-import { NextRequest, NextResponse } from 'next/server'
-import { getUsersCollection, getDiscoveriesCollection } from '@/lib/mongodb'
-
-export async function POST(req: NextRequest) {
-  try {
-    const { address, formula, name, rarity, points, tokenId } = await req.json()
-    if (!address || !formula) {
-      return NextResponse.json({ error: 'Address and formula required' }, { status: 400 })
-    }
-
-    const users = await getUsersCollection()
-    const discoveries = await getDiscoveriesCollection()
-    const now = new Date()
-    const addressLower = address.toLowerCase()
-
-    // Check if user already discovered this
-    const existingDiscovery = await discoveries.findOne({ 
-      address: addressLower, 
-      formula 
-    })
-
-    if (existingDiscovery) {
-      return NextResponse.json({ error: 'Already discovered', existing: true }, { status: 400 })
-    }
-
-    // Record discovery
-    await discoveries.insertOne({
-      address: addressLower,
-      formula,
-      name,
-      rarity,
-      points,
-      tokenId,
-      createdAt: now
-    })
-
-    // Update user points and discoveries
-    const updateResult = await users.updateOne(
-      { address: addressLower },
-      {
-        $inc: { points, streak: 1 },
-        $push: { discoveries: { formula, name, rarity, points, tokenId, createdAt: now } },
-        $set: { updatedAt: now }
-      }
+  if (!isSDKLoaded) {
+    return (
+      <SafeAreaContainer insets={context?.client?.safeAreaInsets}>
+        <div className="flex min-h-screen flex-col items-center justify-center p-4 bg-[#000814]">
+          <h1 className="text-xl font-bold text-center text-white">
+            Please open in Farcaster app
+          </h1>
+        </div>
+      </SafeAreaContainer>
     )
-
-    // Check badges
-    const user = await users.findOne({ address: addressLower })
-    const newBadges: string[] = []
-
-    if (user) {
-      const discoveryCount = user.discoveries?.length || 0
-      
-      if (discoveryCount === 1 && !user.badges?.includes('first')) {
-        newBadges.push('first')
-      }
-      if (discoveryCount >= 5 && !user.badges?.includes('chemist')) {
-        newBadges.push('chemist')
-      }
-      if (discoveryCount >= 10 && !user.badges?.includes('scientist')) {
-        newBadges.push('scientist')
-      }
-      if (rarity === 'rare' && !user.badges?.includes('rare')) {
-        newBadges.push('rare')
-      }
-      if (rarity === 'epic' && !user.badges?.includes('epic')) {
-        newBadges.push('epic')
-      }
-      if (rarity === 'legendary' && !user.badges?.includes('legendary')) {
-        newBadges.push('legendary')
-      }
-      if ((user.streak || 0) >= 5 && !user.badges?.includes('streak')) {
-        newBadges.push('streak')
-      }
-
-      if (newBadges.length > 0) {
-        await users.updateOne(
-          { address: addressLower },
-          { $push: { badges: { $each: newBadges } } }
-        )
-      }
-    }
-
-    return NextResponse.json({ 
-      success: true, 
-      points, 
-      newBadges,
-      totalPoints: (user?.points || 0) + points
-    })
-  } catch (error) {
-    console.error(error)
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
+
+  if (screen === 'splash') {
+    return (
+      <SafeAreaContainer insets={context?.client?.safeAreaInsets}>
+        <SplashScreen onComplete={handleSplashComplete} />
+      </SafeAreaContainer>
+    )
+  }
+
+  return (
+    <SafeAreaContainer insets={context?.client?.safeAreaInsets}>
+      <div className="min-h-screen bg-[#000814] text-white flex flex-col">
+        {/* Header */}
+        <Header points={points} streak={streak} level={level} />
+        
+        {/* Main Content */}
+        <div className="flex-1 overflow-hidden">
+          {screen === 'lab' && <GameArena points={points} streak={streak} onReaction={handleReaction} />}
+          {(screen === 'ranks' || screen === 'profile') && <Profile points={points} discoveries={discoveries} earnedBadges={earnedBadges} />}
+        </div>
+        
+        {/* Navbar */}
+        <Navbar activeTab={screen === 'lab' ? 'lab' : screen === 'ranks' ? 'ranks' : 'profile'} onTabChange={(tab) => setScreen(tab)} />
+      </div>
+    </SafeAreaContainer>
+  )
 }
 EOF
 
-cat > app/api/game/discoveries/route.ts << 'EOF'
-import { NextRequest, NextResponse } from 'next/server'
-import { getDiscoveriesCollection } from '@/lib/mongodb'
+echo "✅ Updated components/pages/app.tsx"
 
-export async function GET(req: NextRequest) {
-  try {
-    const address = req.nextUrl.searchParams.get('address')
-    if (!address) return NextResponse.json({ error: 'Address required' }, { status: 400 })
-
-    const discoveries = await getDiscoveriesCollection()
-    const userDiscoveries = await discoveries
-      .find({ address: address.toLowerCase() })
-      .sort({ createdAt: -1 })
-      .toArray()
-
-    return NextResponse.json(userDiscoveries)
-  } catch (error) {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
-  }
-}
-EOF
-
-cat > app/api/leaderboard/route.ts << 'EOF'
-import { NextRequest, NextResponse } from 'next/server'
-import { getUsersCollection } from '@/lib/mongodb'
-
-export async function GET(req: NextRequest) {
-  try {
-    const limit = parseInt(req.nextUrl.searchParams.get('limit') || '20')
-    
-    const users = await getUsersCollection()
-    const leaderboard = await users
-      .find({ points: { $gt: 0 } })
-      .sort({ points: -1 })
-      .limit(limit)
-      .project({ address: 1, username: 1, fid: 1, points: 1, discoveries: 1, badges: 1 })
-      .toArray()
-
-    const ranked = leaderboard.map((user, index) => ({
-      rank: index + 1,
-      address: user.address,
-      username: user.username,
-      fid: user.fid,
-      points: user.points,
-      level: Math.floor(user.points / 1000) + 1,
-      discoveryCount: user.discoveries?.length || 0,
-      badgeCount: user.badges?.length || 0
-    }))
-
-    return NextResponse.json(ranked)
-  } catch (error) {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
-  }
-}
-EOF
-
-cat > app/api/leaderboard/rank/route.ts << 'EOF'
-import { NextRequest, NextResponse } from 'next/server'
-import { getUsersCollection } from '@/lib/mongodb'
-
-export async function GET(req: NextRequest) {
-  try {
-    const address = req.nextUrl.searchParams.get('address')
-    if (!address) return NextResponse.json({ error: 'Address required' }, { status: 400 })
-
-    const users = await getUsersCollection()
-    const user = await users.findOne({ address: address.toLowerCase() })
-
-    if (!user) return NextResponse.json({ rank: null, points: 0 })
-
-    const rank = await users.countDocuments({ points: { $gt: user.points } }) + 1
-
-    return NextResponse.json({
-      rank,
-      address: user.address,
-      username: user.username,
-      points: user.points,
-      level: Math.floor(user.points / 1000) + 1,
-      discoveryCount: user.discoveries?.length || 0,
-      badgeCount: user.badges?.length || 0
-    })
-  } catch (error) {
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
-  }
-}
-EOF
-
-echo "✅ Phase 3 Done - Hooks, MongoDB, API routes created"
-echo "Add MONGODB_URI to .env.local"
+echo ""
+echo "═══════════════════════════════════════════════════════════════════════════════"
+echo "🎉 Done! Header added!"
+echo "═══════════════════════════════════════════════════════════════════════════════"
+echo ""
+echo "📁 Files created/updated:"
+echo "   ✓ components/game/Header.tsx - Header component"
+echo "   ✓ components/game/index.ts - Added Header export"
+echo "   ✓ components/pages/app.tsx - Added Header to layout"
+echo ""
+echo "🎨 Header includes:"
+echo "   • ⚗️ Logo + Chain Reaction LABS text"
+echo "   • 🔥 Streak counter"
+echo "   • ⭐ Points (comma formatted)"
+echo "   • 🎖️ Level (calculated from points)"
+echo "   • 💚 Wallet connect/disconnect with dropdown"
+echo ""
