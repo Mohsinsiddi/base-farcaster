@@ -1,147 +1,128 @@
 #!/bin/bash
 
-echo "🔗 Chain Reaction - Header Connect Button Fix"
-echo "=============================================="
+echo "🔗 Quick Header Fix - Use Existing Wagmi Setup"
+echo "================================================"
 
 cat > components/game/Header.tsx << 'EOF'
 'use client'
 
-import { useAccount, useConnect, useDisconnect } from 'wagmi'
 import { useState } from 'react'
+import { useAccount, useConnect, useDisconnect } from 'wagmi'
+import { useAppKit } from '@reown/appkit/react'
 
 interface HeaderProps {
   points: number
-  streak: number
-  level: number
-  username?: string
-  pfpUrl?: string
 }
 
-export function Header({ points, streak, level, username, pfpUrl }: HeaderProps) {
+export function Header({ points }: HeaderProps) {
   const { address, isConnected } = useAccount()
-  const { connect, connectors } = useConnect()
   const { disconnect } = useDisconnect()
-  const [showDropdown, setShowDropdown] = useState(false)
+  const { open } = useAppKit()
+  const [showMenu, setShowMenu] = useState(false)
 
-  const truncateAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
-
-  const handleConnect = () => {
-    const connector = connectors[0]
-    if (connector) {
-      connect({ connector })
-    }
-  }
+  const truncate = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
 
   return (
-    <header className="bg-[#000814] border-b border-[#0A5CDD]/20 px-4 py-3">
-      <div className="flex items-center justify-between">
-        {/* Left - Logo/Title */}
-        <div className="flex items-center gap-2">
-          <span className="text-2xl">⚗️</span>
-          <span className="text-white font-bold text-lg hidden sm:block">Chain Reaction</span>
+    <header className="bg-[#000814]/95 backdrop-blur-xl border-b border-[#0A5CDD]/20 px-4 py-3 sticky top-0 z-50">
+      <div className="flex items-center justify-between max-w-lg mx-auto">
+        {/* Logo */}
+        <div className="flex items-center gap-2.5">
+          <div className="relative">
+            <svg width="38" height="38" viewBox="0 0 100 100" fill="none">
+              <path d="M35 15 L35 40 L15 75 Q10 85 20 92 L80 92 Q90 85 85 75 L65 40 L65 15" fill="url(#fg)" stroke="#0A5CDD" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+              <rect x="33" y="8" width="34" height="10" rx="2" fill="#0A5CDD"/>
+              <path d="M20 75 L35 55 L65 55 L80 75 Q85 82 78 88 L22 88 Q15 82 20 75" fill="url(#lg)"/>
+              <circle cx="35" cy="72" r="4" fill="#22C55E" opacity="0.8">
+                <animate attributeName="cy" values="72;60;72" dur="2s" repeatCount="indefinite"/>
+              </circle>
+              <circle cx="50" cy="78" r="3" fill="#A855F7" opacity="0.8">
+                <animate attributeName="cy" values="78;62;78" dur="1.5s" repeatCount="indefinite"/>
+              </circle>
+              <circle cx="62" cy="70" r="3.5" fill="#F59E0B" opacity="0.8">
+                <animate attributeName="cy" values="70;58;70" dur="1.8s" repeatCount="indefinite"/>
+              </circle>
+              <g transform="translate(50,32)">
+                <ellipse rx="10" ry="4" fill="none" stroke="#0A5CDD" strokeWidth="1.5" opacity="0.6" transform="rotate(-45)"/>
+                <ellipse rx="10" ry="4" fill="none" stroke="#22C55E" strokeWidth="1.5" opacity="0.6" transform="rotate(45)"/>
+                <circle r="3" fill="#0A5CDD"/>
+              </g>
+              <defs>
+                <linearGradient id="fg" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#001226"/><stop offset="100%" stopColor="#000814"/>
+                </linearGradient>
+                <linearGradient id="lg" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#0A5CDD" stopOpacity="0.7"/>
+                  <stop offset="50%" stopColor="#22C55E" stopOpacity="0.5"/>
+                  <stop offset="100%" stopColor="#A855F7" stopOpacity="0.7"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-white font-black text-[17px] leading-tight">
+              Chain<span className="text-[#0A5CDD]">Reaction</span>
+            </span>
+            <span className="text-[#6B7280] text-[9px] font-semibold tracking-[0.2em] uppercase">Labs</span>
+          </div>
         </div>
 
-        {/* Center - Stats (only show when connected) */}
-        {isConnected && (
-          <div className="flex items-center gap-3">
-            {/* Streak */}
-            {streak > 0 && (
-              <div className="flex items-center gap-1 bg-[#F59E0B]/20 px-2.5 py-1 rounded-lg">
-                <span className="text-sm">🔥</span>
-                <span className="text-[#F59E0B] font-bold text-sm">{streak}</span>
-              </div>
-            )}
-            
-            {/* Points */}
-            <div className="flex items-center gap-1 bg-[#0A5CDD]/20 px-2.5 py-1 rounded-lg">
+        {/* Right */}
+        <div className="flex items-center gap-2.5">
+          {isConnected && (
+            <div className="flex items-center gap-1.5 bg-[#0A5CDD]/20 border border-[#0A5CDD]/30 px-3 py-1.5 rounded-xl">
               <span className="text-sm">⚡</span>
-              <span className="text-[#0A5CDD] font-bold text-sm">{points.toLocaleString()}</span>
+              <span className="text-white font-bold text-sm">{points.toLocaleString()}</span>
             </div>
-            
-            {/* Level */}
-            <div className="flex items-center gap-1 bg-[#22C55E]/20 px-2.5 py-1 rounded-lg">
-              <span className="text-[#22C55E] font-bold text-sm">Lv.{level}</span>
-            </div>
-          </div>
-        )}
+          )}
 
-        {/* Right - Profile or Connect */}
-        {isConnected ? (
-          <div className="relative">
-            <button 
-              onClick={() => setShowDropdown(!showDropdown)}
-              className="flex items-center gap-2 bg-[#001226] border border-[#0A5CDD]/30 rounded-xl px-3 py-1.5 hover:border-[#0A5CDD] transition-colors"
-            >
-              {/* Avatar */}
-              {pfpUrl ? (
-                <img src={pfpUrl} alt="" className="w-7 h-7 rounded-full object-cover" />
-              ) : (
-                <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#0A5CDD] to-[#22C55E] flex items-center justify-center">
-                  <span className="text-white text-xs font-bold">
-                    {username?.[0]?.toUpperCase() || address?.slice(2, 4).toUpperCase()}
-                  </span>
-                </div>
-              )}
-              
-              {/* Name/Address */}
-              <span className="text-white text-sm font-medium hidden sm:block">
-                {username || truncateAddress(address!)}
-              </span>
-              
-              <span className="text-[#6B7280] text-xs">▼</span>
-            </button>
-
-            {/* Dropdown */}
-            {showDropdown && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowDropdown(false)} />
-                <div className="absolute right-0 top-full mt-2 w-48 bg-[#001226] border border-[#0A5CDD]/30 rounded-xl overflow-hidden z-50 shadow-xl">
-                  <div className="p-3 border-b border-[#0A5CDD]/20">
-                    <p className="text-[#6B7280] text-xs">Connected as</p>
-                    <p className="text-white text-sm font-mono truncate">{truncateAddress(address!)}</p>
+          {isConnected ? (
+            <div className="relative">
+              <button 
+                onClick={() => setShowMenu(!showMenu)}
+                className="flex items-center gap-2 bg-[#001226] border border-[#22C55E]/40 rounded-xl px-3 py-1.5"
+              >
+                <div className="w-2 h-2 bg-[#22C55E] rounded-full animate-pulse"/>
+                <span className="text-white text-sm font-mono">{truncate(address!)}</span>
+              </button>
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)}/>
+                  <div className="absolute right-0 top-full mt-2 bg-[#001226] border border-[#0A5CDD]/30 rounded-xl z-50 shadow-xl overflow-hidden">
+                    <button
+                      onClick={() => { disconnect(); setShowMenu(false) }}
+                      className="px-4 py-2.5 text-[#DC2626] hover:bg-[#DC2626]/10 flex items-center gap-2 w-full"
+                    >
+                      🔌 <span className="text-sm">Disconnect</span>
+                    </button>
                   </div>
-                  <button
-                    onClick={() => { disconnect(); setShowDropdown(false) }}
-                    className="w-full px-3 py-2.5 text-left text-[#DC2626] hover:bg-[#DC2626]/10 transition-colors flex items-center gap-2"
-                  >
-                    <span>🔌</span>
-                    <span className="text-sm font-medium">Disconnect</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        ) : (
-          /* Connect Button - Show when not connected */
-          <button
-            onClick={handleConnect}
-            className="flex items-center gap-2 bg-gradient-to-r from-[#0A5CDD] to-[#2563EB] text-white px-4 py-2 rounded-xl font-medium text-sm hover:opacity-90 active:scale-95 transition-all shadow-lg shadow-[#0A5CDD]/20"
-          >
-            <span>🔗</span>
-            <span>Connect</span>
-          </button>
-        )}
+                </>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={() => open()}
+              className="flex items-center gap-2 bg-gradient-to-r from-[#0A5CDD] to-[#2563EB] text-white px-4 py-2 rounded-xl font-semibold text-sm active:scale-95 shadow-lg"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/>
+                <path d="M4 6v12c0 1.1.9 2 2 2h14v-4"/>
+                <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+              </svg>
+              <span>Connect</span>
+            </button>
+          )}
+        </div>
       </div>
     </header>
   )
 }
 EOF
 
-echo "✅ components/game/Header.tsx - With connect button"
-
+echo "✅ components/game/Header.tsx updated!"
 echo ""
-echo "=============================================="
-echo "✅ Header Updated!"
-echo "=============================================="
+echo "Uses:"
+echo "  • useAccount() - get address"
+echo "  • useAppKit().open() - opens Reown modal"
+echo "  • useDisconnect() - disconnect"
 echo ""
-echo "When wallet NOT connected:"
-echo "  ┌──────────────────────────────────┐"
-echo "  │ ⚗️ Chain Reaction    [🔗 Connect]│"
-echo "  └──────────────────────────────────┘"
-echo ""
-echo "When wallet IS connected:"
-echo "  ┌──────────────────────────────────────────┐"
-echo "  │ ⚗️   🔥3  ⚡1,250  Lv.2   [👤 0x12..ab]│"
-echo "  └──────────────────────────────────────────┘"
-echo ""
-echo "Run: chmod +x header-connect-fix.sh && ./header-connect-fix.sh"
+echo "That's it! Your WalletProvider already handles everything."
