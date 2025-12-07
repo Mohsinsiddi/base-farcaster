@@ -37,7 +37,6 @@ export const ATOMS: Atom[] = [
   { symbol: 'Na', name: 'Sodium', color: '#000000', bgColor: '#EAB308' },
 ]
 
-// Base rarity determines minimum, but can roll higher
 export const COMPOUNDS: Compound[] = [
   { formula: 'H2O', name: 'Water', atoms: { H: 2, O: 1 }, baseRarity: 'common', hint: 'Essential for life!' },
   { formula: 'CO2', name: 'Carbon Dioxide', atoms: { C: 1, O: 2 }, baseRarity: 'common', hint: 'You breathe this out' },
@@ -56,10 +55,12 @@ export const BADGES: Badge[] = [
   { id: 'first', name: 'First Reaction', icon: '🔰', requirement: 'Create first compound', threshold: 1 },
   { id: 'chemist', name: 'Chemist', icon: '⚗️', requirement: 'Create 5 compounds', threshold: 5 },
   { id: 'scientist', name: 'Mad Scientist', icon: '🧬', requirement: 'Create 10 compounds', threshold: 10 },
-  { id: 'rare', name: 'Rare Hunter', icon: '💎', requirement: 'Get a Rare NFT', threshold: 1 },
-  { id: 'epic', name: 'Epic Finder', icon: '🔮', requirement: 'Get an Epic NFT', threshold: 1 },
-  { id: 'legendary', name: 'Legend', icon: '👑', requirement: 'Get a Legendary NFT', threshold: 1 },
-  { id: 'streak', name: 'On Fire', icon: '🔥', requirement: '5 streak combo', threshold: 5 },
+  { id: 'master', name: 'Master Chemist', icon: '🎓', requirement: 'Create 25 compounds', threshold: 25 },
+  { id: 'rare', name: 'Rare Hunter', icon: '💎', requirement: 'Mint a Rare NFT', threshold: 1 },
+  { id: 'epic', name: 'Epic Finder', icon: '🔮', requirement: 'Mint an Epic NFT', threshold: 1 },
+  { id: 'legendary', name: 'Legend', icon: '👑', requirement: 'Mint a Legendary NFT', threshold: 1 },
+  { id: 'streak', name: 'On Fire', icon: '🔥', requirement: '5 mint streak', threshold: 5 },
+  { id: 'streak10', name: 'Unstoppable', icon: '⚡', requirement: '10 mint streak', threshold: 10 },
 ]
 
 export const RARITY_COLORS: Record<Rarity, string> = {
@@ -83,11 +84,8 @@ export const POINTS_BY_RARITY: Record<Rarity, number> = {
   legendary: 1000,
 }
 
-// Rarity order for comparisons
 const RARITY_ORDER: Rarity[] = ['common', 'rare', 'epic', 'legendary']
 
-// Upgrade chances from base rarity
-// e.g., if base is 'common', 15% to become rare, 3% epic, 0.5% legendary
 const UPGRADE_CHANCES: Record<Rarity, Record<Rarity, number>> = {
   common: { common: 0.815, rare: 0.15, epic: 0.03, legendary: 0.005 },
   rare: { common: 0, rare: 0.85, epic: 0.12, legendary: 0.03 },
@@ -95,10 +93,6 @@ const UPGRADE_CHANCES: Record<Rarity, Record<Rarity, number>> = {
   legendary: { common: 0, rare: 0, epic: 0, legendary: 1.0 },
 }
 
-/**
- * Roll rarity based on compound's base rarity
- * Higher base rarities have better upgrade chances
- */
 export function rollRarity(baseRarity: Rarity): Rarity {
   const chances = UPGRADE_CHANCES[baseRarity]
   const roll = Math.random()
@@ -111,21 +105,14 @@ export function rollRarity(baseRarity: Rarity): Rarity {
     }
   }
   
-  return baseRarity // Fallback
+  return baseRarity
 }
 
-/**
- * Get points for a given rarity
- */
 export function getPointsForRarity(rarity: Rarity): number {
   return POINTS_BY_RARITY[rarity]
 }
 
-/**
- * Format atom count to formula string
- */
 export function formatFormula(atoms: Record<string, number>): string {
-  // Standard chemical formula order: C, H, then alphabetical
   const order = ['C', 'H']
   const sorted = Object.entries(atoms).sort(([a], [b]) => {
     const aIdx = order.indexOf(a)
@@ -141,10 +128,6 @@ export function formatFormula(atoms: Record<string, number>): string {
     .join('')
 }
 
-/**
- * Check if selected atoms form a valid compound
- * Returns compound with rolled rarity and points
- */
 export function checkCompound(selectedAtoms: string[]): RolledCompound | null {
   const atomCount: Record<string, number> = {}
   selectedAtoms.forEach(atom => {
@@ -160,7 +143,6 @@ export function checkCompound(selectedAtoms: string[]): RolledCompound | null {
 
   if (!compound) return null
 
-  // Roll for rarity
   const rarity = rollRarity(compound.baseRarity)
   const points = getPointsForRarity(rarity)
 
@@ -171,9 +153,6 @@ export function checkCompound(selectedAtoms: string[]): RolledCompound | null {
   }
 }
 
-/**
- * Generate token URI for NFT metadata
- */
 export function generateTokenURI(
   formula: string,
   name: string,
@@ -191,10 +170,13 @@ export function generateTokenURI(
     ],
   }
   
-  // Return base64 encoded JSON for on-chain metadata
   const json = JSON.stringify(metadata)
   const base64 = Buffer.from(json).toString('base64')
   return `data:application/json;base64,${base64}`
+}
+
+export function getBadgeById(id: string): Badge | undefined {
+  return BADGES.find(b => b.id === id)
 }
 
 export const LEADERBOARD_MOCK = [

@@ -34,6 +34,13 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Check if user already discovered this compound (optional: allow re-mints)
+    const existingDiscovery = await discoveries.findOne({ 
+      address: addressLower, 
+      formula 
+    })
+    const isNewDiscovery = !existingDiscovery
+
     // Record the mint/discovery
     const discovery = {
       address: addressLower,
@@ -43,17 +50,22 @@ export async function POST(req: NextRequest) {
       points,
       txHash,
       tokenId,
+      isNewDiscovery,
       mintedAt: now,
       createdAt: now
     }
 
     await discoveries.insertOne(discovery)
 
-    // Update or create user
+    // Update or create user with streak increment
     const userUpdate = await users.findOneAndUpdate(
       { address: addressLower },
       {
-        $inc: { points, totalMints: 1 },
+        $inc: { 
+          points, 
+          totalMints: 1,
+          streak: 1  // Increment streak on successful mint
+        },
         $push: { 
           discoveries: {
             formula,
@@ -62,13 +74,16 @@ export async function POST(req: NextRequest) {
             points,
             txHash,
             tokenId,
+            isNewDiscovery,
             mintedAt: now
           }
         },
-        $set: { updatedAt: now },
+        $set: { 
+          updatedAt: now,
+          lastMintAt: now  // Track last mint time for streak decay
+        },
         $setOnInsert: {
           address: addressLower,
-          streak: 0,
           badges: [],
           createdAt: now
         }
@@ -82,14 +97,18 @@ export async function POST(req: NextRequest) {
     const newBadges: string[] = []
     const currentBadges = user?.badges || []
     const discoveryCount = user?.discoveries?.length || 0
+    const currentStreak = user?.streak || 0
 
     const badgeChecks = [
       { id: 'first', condition: discoveryCount >= 1 },
       { id: 'chemist', condition: discoveryCount >= 5 },
       { id: 'scientist', condition: discoveryCount >= 10 },
+      { id: 'master', condition: discoveryCount >= 25 },
       { id: 'rare', condition: rarity === 'rare' },
       { id: 'epic', condition: rarity === 'epic' },
       { id: 'legendary', condition: rarity === 'legendary' },
+      { id: 'streak', condition: currentStreak >= 5 },  // On Fire badge
+      { id: 'streak10', condition: currentStreak >= 10 }, // Hot Streak badge
     ]
 
     for (const check of badgeChecks) {
@@ -105,12 +124,19 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    // Calculate level
+    const totalPoints = user?.points || points
+    const level = Math.floor(totalPoints / 1000) + 1
+
     return NextResponse.json({
       success: true,
       discovery,
+      isNewDiscovery,
       newBadges,
-      totalPoints: user?.points || points,
-      totalMints: user?.totalMints || 1
+      totalPoints,
+      totalMints: user?.totalMints || 1,
+      streak: currentStreak,
+      level
     })
 
   } catch (error) {
@@ -140,7 +166,10 @@ export async function GET(req: NextRequest) {
       .sort({ mintedAt: -1 })
       .toArray()
 
-    return NextResponse.json({ mints })
+    return NextResponse.json({ 
+      mints,
+      total: mints.length 
+    })
 
   } catch (error) {
     console.error('Get mints error:', error)
