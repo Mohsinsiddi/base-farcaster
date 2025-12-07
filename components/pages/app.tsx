@@ -15,7 +15,6 @@ interface FarcasterUser {
   pfpUrl?: string
 }
 
-// Farcaster SDK hook with fallback
 function useFarcasterOrLocal() {
   const [context, setContext] = useState<any>(undefined)
   const [farcasterUser, setFarcasterUser] = useState<FarcasterUser | undefined>()
@@ -32,7 +31,6 @@ function useFarcasterOrLocal() {
           setContext(ctx)
           setIsSDKLoaded(true)
           
-          // Extract Farcaster user info
           if (ctx.user) {
             setFarcasterUser({
               fid: ctx.user.fid,
@@ -70,15 +68,15 @@ export default function App() {
   const [earnedBadges, setEarnedBadges] = useState<string[]>([])
   const [isUserLoaded, setIsUserLoaded] = useState(false)
 
-  // Calculate level from points
   const level = Math.floor(points / 1000) + 1
 
-  // Fetch user data from API on connect
+  // Get list of discovered formulas for "NEW" badge detection
+  const discoveredFormulas = discoveries.map(d => d.formula)
+
   const fetchUserData = useCallback(async () => {
     if (!address) return
     
     try {
-      // Create/update user with Farcaster info
       await fetch('/api/user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -89,7 +87,6 @@ export default function App() {
         })
       })
 
-      // Fetch user data
       const res = await fetch(`/api/user?address=${address}`)
       if (res.ok) {
         const data = await res.json()
@@ -117,11 +114,13 @@ export default function App() {
 
   const handleReaction = async (success: boolean, compound: RolledCompound | null) => {
     if (success && compound) {
-      // Optimistic update
-      setPoints(prev => prev + compound.points)
+      // Apply streak multiplier
+      const multiplier = streak >= 10 ? 2.0 : streak >= 7 ? 1.5 : streak >= 5 ? 1.25 : streak >= 3 ? 1.1 : 1.0
+      const bonusPoints = Math.floor(compound.points * multiplier)
+      
+      setPoints(prev => prev + bonusPoints)
       setStreak(prev => prev + 1)
     } else if (!success && address) {
-      // Reset streak on failed reaction
       setStreak(0)
       try {
         await fetch('/api/game/streak-reset', {
@@ -136,7 +135,6 @@ export default function App() {
   }
 
   const handleMintSuccess = async (compound: RolledCompound, txHash: string) => {
-    // Add to discoveries locally
     const newDiscovery = {
       ...compound,
       txHash,
@@ -144,7 +142,6 @@ export default function App() {
     }
     setDiscoveries(prev => [newDiscovery, ...prev])
     
-    // Refresh user data to get updated badges
     setTimeout(fetchUserData, 1000)
   }
 
@@ -182,7 +179,6 @@ export default function App() {
   return (
     <SafeAreaContainer insets={context?.client?.safeAreaInsets}>
       <div className="min-h-screen bg-[#000814] text-white flex flex-col">
-        {/* Header */}
         <Header 
           points={points} 
           streak={streak} 
@@ -191,7 +187,6 @@ export default function App() {
           pfpUrl={farcasterUser?.pfpUrl}
         />
         
-        {/* Main Content */}
         <div className="flex-1 overflow-hidden">
           {screen === 'lab' && (
             <GameArena 
@@ -199,13 +194,13 @@ export default function App() {
               streak={streak} 
               onReaction={handleReaction}
               onMintSuccess={handleMintSuccess}
+              recentDiscoveries={discoveredFormulas}
             />
           )}
           {screen === 'ranks' && <Leaderboard />}
           {screen === 'profile' && <Profile farcasterUser={farcasterUser} />}
         </div>
         
-        {/* Navbar */}
         <Navbar 
           activeTab={screen === 'lab' ? 'lab' : screen === 'ranks' ? 'ranks' : 'profile'} 
           onTabChange={(tab) => setScreen(tab)} 

@@ -1,577 +1,627 @@
 #!/bin/bash
 
-echo "🎮 Chain Reaction - Phase 5: Profile & Leaderboard"
-echo "==================================================="
+echo "🧪 Chain Reaction - Phase 6: Enhanced Lab Page"
+echo "==============================================="
 
 mkdir -p components/game
 
 # ============================================
-# 1. LEADERBOARD COMPONENT (NEW)
+# 1. ENHANCED GAME ARENA
 # ============================================
-cat > components/game/Leaderboard.tsx << 'EOF'
+cat > components/game/GameArena.tsx << 'EOF'
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useAccount } from 'wagmi'
+import { useMintMolecule, MOLECULE_NFT_ADDRESS } from '@/lib/hooks/useContract'
+import { 
+  ATOMS, 
+  COMPOUNDS,
+  checkCompound, 
+  formatFormula, 
+  RARITY_COLORS, 
+  RARITY_GLOW,
+  generateTokenURI,
+  type RolledCompound,
+  type Rarity,
+  type Compound
+} from '@/lib/gameData'
 
-interface LeaderboardEntry {
-  rank: number
-  address: string
-  username?: string
-  fid?: number
+interface GameArenaProps {
   points: number
-  level: number
-  totalMints: number
-  discoveryCount: number
-  badgeCount: number
-}
-
-interface UserRank {
-  rank: number | null
-  totalPlayers: number
-  address: string
-  username?: string
-  points: number
-  level: number
-  totalMints: number
-  discoveryCount: number
-  percentile: number
-}
-
-export function Leaderboard() {
-  const { address } = useAccount()
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
-  const [userRank, setUserRank] = useState<UserRank | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [activeFilter, setActiveFilter] = useState<'all' | 'weekly'>('all')
-
-  useEffect(() => {
-    fetchLeaderboard()
-    if (address) fetchUserRank()
-  }, [address])
-
-  const fetchLeaderboard = async () => {
-    try {
-      const res = await fetch('/api/leaderboard?limit=50')
-      const data = await res.json()
-      if (Array.isArray(data)) {
-        setLeaderboard(data)
-      }
-    } catch (err) {
-      console.error('Failed to fetch leaderboard:', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const fetchUserRank = async () => {
-    if (!address) return
-    try {
-      const res = await fetch(`/api/leaderboard/rank?address=${address}`)
-      const data = await res.json()
-      if (data.rank !== undefined) {
-        setUserRank(data)
-      }
-    } catch (err) {
-      console.error('Failed to fetch user rank:', err)
-    }
-  }
-
-  const formatAddress = (addr: string) => `${addr.slice(0, 6)}...${addr.slice(-4)}`
-
-  const getRankDisplay = (rank: number) => {
-    if (rank === 1) return '🥇'
-    if (rank === 2) return '🥈'
-    if (rank === 3) return '🥉'
-    return `#${rank}`
-  }
-
-  const getRankStyle = (rank: number) => {
-    if (rank === 1) return 'bg-gradient-to-r from-[#FFD700]/20 to-[#FFA500]/20 border-[#FFD700]/50'
-    if (rank === 2) return 'bg-gradient-to-r from-[#C0C0C0]/20 to-[#A0A0A0]/20 border-[#C0C0C0]/50'
-    if (rank === 3) return 'bg-gradient-to-r from-[#CD7F32]/20 to-[#B87333]/20 border-[#CD7F32]/50'
-    return 'bg-[#001226] border-[#0A5CDD]/20'
-  }
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col h-full pb-20 items-center justify-center">
-        <div className="animate-spin text-4xl mb-4">🏆</div>
-        <p className="text-[#6B7280]">Loading rankings...</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-col h-full pb-20">
-      {/* Header */}
-      <div className="bg-[#001226] border-b border-[#0A5CDD]/20 p-4">
-        <h1 className="text-xl font-bold text-white text-center mb-1">🏆 Leaderboard</h1>
-        <p className="text-[#6B7280] text-xs text-center">Top Scientists on Base</p>
-        
-        {/* Filter Tabs */}
-        <div className="flex gap-2 mt-4 justify-center">
-          {['all', 'weekly'].map((filter) => (
-            <button
-              key={filter}
-              onClick={() => setActiveFilter(filter as 'all' | 'weekly')}
-              className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                activeFilter === filter
-                  ? 'bg-[#0A5CDD] text-white'
-                  : 'bg-[#1F2937] text-[#6B7280]'
-              }`}
-            >
-              {filter === 'all' ? 'All Time' : 'This Week'}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Top 3 Podium */}
-      {leaderboard.length >= 3 && (
-        <div className="px-4 py-6 bg-gradient-to-b from-[#001226] to-transparent">
-          <div className="flex justify-center items-end gap-2">
-            {/* 2nd Place */}
-            <div className="flex flex-col items-center">
-              <div className="w-16 h-16 bg-gradient-to-br from-[#C0C0C0] to-[#808080] rounded-full flex items-center justify-center text-2xl mb-2 shadow-lg">
-                🥈
-              </div>
-              <p className="text-white text-xs font-medium truncate max-w-[80px]">
-                {leaderboard[1]?.username || formatAddress(leaderboard[1]?.address || '')}
-              </p>
-              <p className="text-[#0A5CDD] text-sm font-bold">{leaderboard[1]?.points.toLocaleString()}</p>
-              <div className="w-16 h-16 bg-[#C0C0C0]/20 rounded-t-lg mt-2" />
-            </div>
-
-            {/* 1st Place */}
-            <div className="flex flex-col items-center -mt-4">
-              <div className="w-20 h-20 bg-gradient-to-br from-[#FFD700] to-[#FFA500] rounded-full flex items-center justify-center text-3xl mb-2 shadow-xl animate-pulse">
-                🥇
-              </div>
-              <p className="text-white text-sm font-bold truncate max-w-[90px]">
-                {leaderboard[0]?.username || formatAddress(leaderboard[0]?.address || '')}
-              </p>
-              <p className="text-[#FFD700] text-lg font-bold">{leaderboard[0]?.points.toLocaleString()}</p>
-              <div className="w-20 h-24 bg-[#FFD700]/20 rounded-t-lg mt-2" />
-            </div>
-
-            {/* 3rd Place */}
-            <div className="flex flex-col items-center">
-              <div className="w-16 h-16 bg-gradient-to-br from-[#CD7F32] to-[#8B4513] rounded-full flex items-center justify-center text-2xl mb-2 shadow-lg">
-                🥉
-              </div>
-              <p className="text-white text-xs font-medium truncate max-w-[80px]">
-                {leaderboard[2]?.username || formatAddress(leaderboard[2]?.address || '')}
-              </p>
-              <p className="text-[#CD7F32] text-sm font-bold">{leaderboard[2]?.points.toLocaleString()}</p>
-              <div className="w-16 h-12 bg-[#CD7F32]/20 rounded-t-lg mt-2" />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Rankings List */}
-      <div className="flex-1 overflow-auto px-4">
-        <p className="text-[#6B7280] text-xs mb-3">
-          {leaderboard.length > 0 ? `${leaderboard.length} Scientists Ranked` : 'No rankings yet'}
-        </p>
-        
-        <div className="space-y-2">
-          {leaderboard.slice(3).map((player) => (
-            <div
-              key={player.address}
-              className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
-                address?.toLowerCase() === player.address
-                  ? 'bg-[#0A5CDD]/20 border-[#0A5CDD]/50'
-                  : 'bg-[#001226] border-[#0A5CDD]/20'
-              }`}
-            >
-              <span className="text-[#6B7280] font-mono text-sm w-8">
-                #{player.rank}
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="text-white font-medium text-sm truncate">
-                  {player.username || formatAddress(player.address)}
-                </p>
-                <div className="flex gap-2 text-xs text-[#6B7280]">
-                  <span>Lv.{player.level}</span>
-                  <span>•</span>
-                  <span>{player.totalMints} mints</span>
-                </div>
-              </div>
-              <p className="text-[#0A5CDD] font-bold">{player.points.toLocaleString()}</p>
-            </div>
-          ))}
-        </div>
-
-        {leaderboard.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-4xl mb-3">🧪</p>
-            <p className="text-[#6B7280]">No scientists ranked yet</p>
-            <p className="text-[#4B5563] text-xs mt-1">Be the first to mint!</p>
-          </div>
-        )}
-      </div>
-
-      {/* Your Rank (Sticky Footer) */}
-      {userRank && userRank.rank && (
-        <div className="px-4 pb-4 pt-2 bg-gradient-to-t from-[#000814] to-transparent">
-          <div className="bg-[#0A5CDD]/20 border border-[#0A5CDD]/50 rounded-xl p-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-[#0A5CDD] rounded-full flex items-center justify-center text-lg">
-                {userRank.rank <= 3 ? getRankDisplay(userRank.rank) : '👤'}
-              </div>
-              <div className="flex-1">
-                <p className="text-white font-medium text-sm">Your Rank</p>
-                <div className="flex gap-2 text-xs text-[#6B7280]">
-                  <span>Top {userRank.percentile}%</span>
-                  <span>•</span>
-                  <span>Lv.{userRank.level}</span>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="text-[#0A5CDD] font-bold text-lg">#{userRank.rank}</p>
-                <p className="text-[#6B7280] text-xs">{userRank.points.toLocaleString()} pts</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-EOF
-
-echo "✅ components/game/Leaderboard.tsx"
-
-# ============================================
-# 2. UPDATED PROFILE COMPONENT
-# ============================================
-cat > components/game/Profile.tsx << 'EOF'
-'use client'
-
-import { useState, useEffect } from 'react'
-import { useAccount } from 'wagmi'
-import { BADGES, RARITY_COLORS, RARITY_GLOW, type Rarity } from '@/lib/gameData'
-
-interface Discovery {
-  formula: string
-  name: string
-  rarity: Rarity
-  points: number
-  txHash?: string
-  mintedAt: string
-}
-
-interface UserData {
-  address: string
-  username?: string
-  fid?: number
-  points: number
-  level: number
   streak: number
-  totalMints: number
-  discoveries: Discovery[]
-  badges: string[]
+  onReaction: (success: boolean, compound: RolledCompound | null) => void
+  onMintSuccess?: (compound: RolledCompound, txHash: string) => void
+  recentDiscoveries?: string[] // formulas already discovered
 }
 
-interface ProfileProps {
-  farcasterUser?: {
-    fid?: number
-    username?: string
-    displayName?: string
-    pfpUrl?: string
-  }
+type GameState = 'idle' | 'reacting' | 'reveal' | 'minting' | 'success' | 'failed'
+
+const MIXING_GIF = 'https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExNDc1aTEydHkwMTF0bHdiNWJmaGR3dG11NXBrYzFma2o5djY5cThpcyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l41lUpphqmQnj4TVC/giphy.gif'
+
+// Streak multiplier bonuses
+const getStreakMultiplier = (streak: number): number => {
+  if (streak >= 10) return 2.0
+  if (streak >= 7) return 1.5
+  if (streak >= 5) return 1.25
+  if (streak >= 3) return 1.1
+  return 1.0
 }
 
-type TabType = 'nfts' | 'badges' | 'stats'
+const getStreakLabel = (streak: number): string => {
+  if (streak >= 10) return '🔥 UNSTOPPABLE'
+  if (streak >= 7) return '⚡ ON FIRE'
+  if (streak >= 5) return '💥 HOT'
+  if (streak >= 3) return '✨ WARMING UP'
+  return ''
+}
 
-export function Profile({ farcasterUser }: ProfileProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('nfts')
-  const [userData, setUserData] = useState<UserData | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const { address } = useAccount()
+export function GameArena({ points, streak, onReaction, onMintSuccess, recentDiscoveries = [] }: GameArenaProps) {
+  const [selectedAtoms, setSelectedAtoms] = useState<string[]>([])
+  const [gameState, setGameState] = useState<GameState>('idle')
+  const [result, setResult] = useState<RolledCompound | null>(null)
+  const [showRarityReveal, setShowRarityReveal] = useState(false)
+  const [revealedRarity, setRevealedRarity] = useState<Rarity | null>(null)
+  const [isNewDiscovery, setIsNewDiscovery] = useState(false)
+  const [bubbles, setBubbles] = useState<{id: number, x: number, size: number, delay: number}[]>([])
 
+  const { address, isConnected } = useAccount()
+  const { mint, hash, isPending, isConfirming, isSuccess, error, reset } = useMintMolecule()
+
+  // Generate bubbles for test tube animation
   useEffect(() => {
-    if (address) {
-      fetchUserData()
-    } else {
-      setIsLoading(false)
-    }
-  }, [address])
+    const newBubbles = Array.from({ length: 8 }, (_, i) => ({
+      id: i,
+      x: 20 + Math.random() * 60,
+      size: 4 + Math.random() * 8,
+      delay: Math.random() * 2
+    }))
+    setBubbles(newBubbles)
+  }, [selectedAtoms.length])
 
-  const fetchUserData = async () => {
-    if (!address) return
+  // Get atom counts
+  const atomCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    selectedAtoms.forEach(atom => {
+      counts[atom] = (counts[atom] || 0) + 1
+    })
+    return counts
+  }, [selectedAtoms])
+
+  // Check for potential compound match (preview)
+  const potentialCompound = useMemo((): Compound | null => {
+    if (selectedAtoms.length === 0) return null
+    
+    // Check exact match first
+    const exactMatch = COMPOUNDS.find(c => {
+      const keys1 = Object.keys(c.atoms).sort()
+      const keys2 = Object.keys(atomCounts).sort()
+      if (keys1.length !== keys2.length) return false
+      return keys1.every(key => c.atoms[key] === atomCounts[key])
+    })
+    if (exactMatch) return exactMatch
+
+    // Check partial match (could become a compound)
+    const partialMatch = COMPOUNDS.find(c => {
+      return Object.entries(atomCounts).every(([atom, count]) => {
+        return c.atoms[atom] !== undefined && c.atoms[atom] >= count
+      })
+    })
+    return partialMatch || null
+  }, [selectedAtoms, atomCounts])
+
+  const isExactMatch = potentialCompound && Object.keys(atomCounts).length === Object.keys(potentialCompound.atoms).length &&
+    Object.entries(atomCounts).every(([atom, count]) => potentialCompound.atoms[atom] === count)
+
+  // Handle mint success
+  useEffect(() => {
+    if (isSuccess && hash && result) {
+      setGameState('success')
+      saveMintToDatabase(result, hash)
+      onMintSuccess?.(result, hash)
+    }
+  }, [isSuccess, hash, result])
+
+  // Handle mint error
+  useEffect(() => {
+    if (error) {
+      console.error('Mint error:', error)
+      setGameState('reveal')
+    }
+  }, [error])
+
+  const saveMintToDatabase = async (compound: RolledCompound, txHash: string) => {
     try {
-      const res = await fetch(`/api/user?address=${address}`)
-      if (res.ok) {
-        const data = await res.json()
-        setUserData(data)
-      }
+      await fetch('/api/mint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address,
+          formula: compound.formula,
+          name: compound.name,
+          rarity: compound.rarity,
+          points: compound.points,
+          txHash,
+        })
+      })
     } catch (err) {
-      console.error('Failed to fetch user data:', err)
-    } finally {
-      setIsLoading(false)
+      console.error('Failed to save mint:', err)
     }
   }
 
-  const tabs = [
-    { id: 'nfts' as const, label: '🧪 NFTs', count: userData?.discoveries?.length || 0 },
-    { id: 'badges' as const, label: '🏅 Badges', count: userData?.badges?.length || 0 },
-    { id: 'stats' as const, label: '📊 Stats' },
-  ]
+  const addAtom = (symbol: string) => {
+    if (selectedAtoms.length < 24 && gameState === 'idle') {
+      setSelectedAtoms([...selectedAtoms, symbol])
+    }
+  }
 
-  const level = userData?.level || 1
-  const points = userData?.points || 0
-  const nextLevelPoints = level * 1000
-  const progress = ((points % 1000) / 1000) * 100
+  const removeAtom = (index: number) => {
+    if (gameState === 'idle') {
+      setSelectedAtoms(selectedAtoms.filter((_, i) => i !== index))
+    }
+  }
 
-  const displayName = farcasterUser?.displayName || farcasterUser?.username || 
-    (address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Not Connected')
+  const removeLastAtom = () => {
+    if (gameState === 'idle' && selectedAtoms.length > 0) {
+      setSelectedAtoms(selectedAtoms.slice(0, -1))
+    }
+  }
 
-  if (isLoading) {
-    return (
-      <div className="flex flex-col h-full pb-20 items-center justify-center">
-        <div className="animate-spin text-4xl mb-4">🧬</div>
-        <p className="text-[#6B7280]">Loading profile...</p>
-      </div>
+  const clearAtoms = () => {
+    setSelectedAtoms([])
+    setResult(null)
+    setGameState('idle')
+    setShowRarityReveal(false)
+    setRevealedRarity(null)
+    setIsNewDiscovery(false)
+    reset()
+  }
+
+  const handleReact = () => {
+    if (selectedAtoms.length === 0) return
+    
+    setGameState('reacting')
+    
+    setTimeout(() => {
+      const compound = checkCompound(selectedAtoms)
+      setResult(compound)
+      
+      if (compound) {
+        const isNew = !recentDiscoveries.includes(compound.formula)
+        setIsNewDiscovery(isNew)
+        setGameState('reveal')
+        animateRarityReveal(compound.rarity)
+        onReaction(true, compound)
+      } else {
+        setGameState('failed')
+        onReaction(false, null)
+      }
+    }, 2500)
+  }
+
+  const animateRarityReveal = (finalRarity: Rarity) => {
+    setShowRarityReveal(true)
+    const rarities: Rarity[] = ['common', 'rare', 'epic', 'legendary']
+    let iterations = 0
+    const maxIterations = 15
+    
+    const interval = setInterval(() => {
+      iterations++
+      const randomRarity = rarities[Math.floor(Math.random() * rarities.length)]
+      setRevealedRarity(randomRarity)
+      
+      if (iterations >= maxIterations) {
+        clearInterval(interval)
+        setRevealedRarity(finalRarity)
+      }
+    }, 100)
+  }
+
+  const handleMint = async () => {
+    if (!result || !isConnected || !address) return
+    
+    setGameState('minting')
+    
+    const tokenURI = generateTokenURI(
+      result.formula,
+      result.name,
+      result.rarity,
+      result.points
+    )
+    
+    await mint(
+      result.formula,
+      result.name,
+      result.rarity,
+      result.points,
+      tokenURI
     )
   }
 
+  const truncateHash = (hash: string) => 
+    `${hash.slice(0, 6)}...${hash.slice(-4)}`
+
+  const streakMultiplier = getStreakMultiplier(streak)
+  const streakLabel = getStreakLabel(streak)
+
   return (
     <div className="flex flex-col h-full pb-20">
-      {/* Profile Header */}
-      <div className="bg-[#001226] border-b border-[#0A5CDD]/20 p-4">
-        <div className="flex items-center gap-4">
-          {/* Avatar */}
-          <div className="relative">
-            {farcasterUser?.pfpUrl ? (
-              <img 
-                src={farcasterUser.pfpUrl} 
-                alt="Profile" 
-                className="w-16 h-16 rounded-full object-cover border-2 border-[#0A5CDD]"
-              />
-            ) : (
-              <div className="w-16 h-16 bg-gradient-to-br from-[#0A5CDD] to-[#2563EB] rounded-full flex items-center justify-center text-2xl">
-                🧬
+      {/* Streak Banner */}
+      {streak >= 3 && (
+        <div 
+          className="mx-4 mt-2 py-2 px-4 rounded-xl text-center text-sm font-bold animate-pulse"
+          style={{
+            background: streak >= 10 ? 'linear-gradient(90deg, #F59E0B20, #DC262620, #F59E0B20)' :
+                       streak >= 5 ? 'linear-gradient(90deg, #F59E0B20, #F59E0B10)' : '#F59E0B10',
+            color: '#F59E0B'
+          }}
+        >
+          {streakLabel} • {streakMultiplier}x BONUS
+        </div>
+      )}
+
+      {/* Main Lab Area */}
+      <div className="flex-1 p-4 overflow-auto">
+        {/* Test Tube Workspace */}
+        <div className="bg-[#001226] border border-[#0A5CDD]/30 rounded-2xl p-4 relative overflow-hidden">
+          <div className="flex justify-between items-center mb-3">
+            <p className="text-[#6B7280] text-xs">REACTION CHAMBER</p>
+            <p className="text-[#6B7280] text-xs">{selectedAtoms.length}/24 atoms</p>
+          </div>
+          
+          {/* Test Tube SVG */}
+          <div className="flex justify-center mb-4">
+            <div className="relative">
+              <svg width="120" height="160" viewBox="0 0 120 160">
+                {/* Test tube outline */}
+                <path
+                  d="M30 10 L30 120 Q30 150 60 150 Q90 150 90 120 L90 10"
+                  fill="none"
+                  stroke="#0A5CDD"
+                  strokeWidth="3"
+                  opacity="0.5"
+                />
+                
+                {/* Liquid fill based on atoms */}
+                {selectedAtoms.length > 0 && (
+                  <path
+                    d={`M32 ${130 - (selectedAtoms.length * 4)} L32 120 Q32 148 60 148 Q88 148 88 120 L88 ${130 - (selectedAtoms.length * 4)}`}
+                    fill={potentialCompound && isExactMatch ? RARITY_COLORS[potentialCompound.baseRarity] + '40' : '#0A5CDD20'}
+                    className="transition-all duration-300"
+                  >
+                    <animate
+                      attributeName="d"
+                      values={`M32 ${130 - (selectedAtoms.length * 4)} L32 120 Q32 148 60 148 Q88 148 88 120 L88 ${130 - (selectedAtoms.length * 4)};
+                               M32 ${128 - (selectedAtoms.length * 4)} L32 120 Q32 148 60 148 Q88 148 88 120 L88 ${132 - (selectedAtoms.length * 4)};
+                               M32 ${130 - (selectedAtoms.length * 4)} L32 120 Q32 148 60 148 Q88 148 88 120 L88 ${130 - (selectedAtoms.length * 4)}`}
+                      dur="2s"
+                      repeatCount="indefinite"
+                    />
+                  </path>
+                )}
+                
+                {/* Bubbles */}
+                {selectedAtoms.length > 0 && bubbles.map(bubble => (
+                  <circle
+                    key={bubble.id}
+                    cx={bubble.x}
+                    cy="140"
+                    r={bubble.size}
+                    fill="#0A5CDD"
+                    opacity="0.3"
+                  >
+                    <animate
+                      attributeName="cy"
+                      values={`140;${40 + Math.random() * 20};140`}
+                      dur={`${2 + bubble.delay}s`}
+                      repeatCount="indefinite"
+                      begin={`${bubble.delay}s`}
+                    />
+                    <animate
+                      attributeName="opacity"
+                      values="0.3;0.6;0"
+                      dur={`${2 + bubble.delay}s`}
+                      repeatCount="indefinite"
+                      begin={`${bubble.delay}s`}
+                    />
+                  </circle>
+                ))}
+                
+                {/* Cork/top */}
+                <rect x="25" y="2" width="70" height="12" rx="3" fill="#8B4513" opacity="0.8" />
+              </svg>
+              
+              {/* Atom badges on tube */}
+              <div className="absolute top-16 left-1/2 -translate-x-1/2 flex flex-wrap gap-1 justify-center max-w-[80px]">
+                {Object.entries(atomCounts).map(([atom, count]) => {
+                  const atomData = ATOMS.find(a => a.symbol === atom)!
+                  return (
+                    <div
+                      key={atom}
+                      className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-xs font-bold"
+                      style={{ backgroundColor: atomData.bgColor, color: atomData.color }}
+                    >
+                      {atom}
+                      {count > 1 && <span className="text-[10px]">×{count}</span>}
+                    </div>
+                  )
+                })}
               </div>
-            )}
-            <div className="absolute -bottom-1 -right-1 bg-[#0A5CDD] text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
-              {level}
             </div>
           </div>
 
-          {/* Info */}
-          <div className="flex-1">
-            <p className="text-white font-bold text-lg">{displayName}</p>
-            {farcasterUser?.fid && (
-              <p className="text-[#6B7280] text-xs">FID: {farcasterUser.fid}</p>
-            )}
-            <p className="text-[#0A5CDD] text-sm font-medium">
-              {level < 5 ? 'Apprentice' : level < 10 ? 'Scientist' : level < 20 ? 'Expert' : 'Master'} Chemist
+          {/* Formula Display */}
+          <div className="text-center mb-2">
+            <p className="text-white text-3xl font-mono font-bold tracking-wider">
+              {selectedAtoms.length > 0 ? formatFormula(atomCounts) : '—'}
             </p>
           </div>
-        </div>
 
-        {/* Level Progress */}
-        <div className="mt-4">
-          <div className="flex justify-between text-xs mb-1">
-            <span className="text-[#6B7280]">Level {level}</span>
-            <span className="text-[#6B7280]">{points.toLocaleString()} / {nextLevelPoints.toLocaleString()} XP</span>
-          </div>
-          <div className="h-2 bg-[#1F2937] rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-gradient-to-r from-[#0A5CDD] to-[#22C55E] transition-all duration-500"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Quick Stats */}
-        <div className="flex gap-4 mt-4">
-          <div className="flex-1 bg-[#0A0A0A] rounded-xl p-3 text-center">
-            <p className="text-[#0A5CDD] text-xl font-bold">{userData?.totalMints || 0}</p>
-            <p className="text-[#6B7280] text-xs">Minted</p>
-          </div>
-          <div className="flex-1 bg-[#0A0A0A] rounded-xl p-3 text-center">
-            <p className="text-[#22C55E] text-xl font-bold">{userData?.streak || 0}</p>
-            <p className="text-[#6B7280] text-xs">Streak</p>
-          </div>
-          <div className="flex-1 bg-[#0A0A0A] rounded-xl p-3 text-center">
-            <p className="text-[#F59E0B] text-xl font-bold">{userData?.badges?.length || 0}</p>
-            <p className="text-[#6B7280] text-xs">Badges</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-[#0A5CDD]/20">
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex-1 py-3 text-sm font-medium transition-colors relative ${
-              activeTab === tab.id 
-                ? 'text-[#0A5CDD] border-b-2 border-[#0A5CDD]' 
-                : 'text-[#6B7280]'
-            }`}
-          >
-            {tab.label}
-            {tab.count !== undefined && tab.count > 0 && (
-              <span className="ml-1 text-xs bg-[#0A5CDD]/20 px-1.5 py-0.5 rounded-full">
-                {tab.count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab Content */}
-      <div className="flex-1 overflow-auto p-4">
-        {/* NFTs Tab */}
-        {activeTab === 'nfts' && (
-          <div>
-            {!userData?.discoveries?.length ? (
-              <div className="text-center py-12">
-                <p className="text-5xl mb-4">🧪</p>
-                <p className="text-white font-medium mb-1">No molecules yet</p>
-                <p className="text-[#6B7280] text-sm">Create compounds in the Lab to mint NFTs!</p>
+          {/* Compound Preview/Hint */}
+          <div className="text-center min-h-[40px]">
+            {selectedAtoms.length === 0 ? (
+              <p className="text-[#4B5563] text-sm">Add atoms to start building</p>
+            ) : isExactMatch && potentialCompound ? (
+              <div className="animate-pulse">
+                <p className="text-[#22C55E] font-medium">{potentialCompound.name}</p>
+                <p className="text-[#6B7280] text-xs">Ready to react! 🧪</p>
+              </div>
+            ) : potentialCompound ? (
+              <div>
+                <p className="text-[#6B7280] text-sm">Building towards...</p>
+                <p className="text-[#0A5CDD] text-sm font-medium">{potentialCompound.name}?</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3">
-                {userData.discoveries.map((compound, index) => (
-                  <div 
-                    key={index} 
-                    className="bg-[#001226] border rounded-xl p-4 text-center transition-all hover:scale-105"
-                    style={{ 
-                      borderColor: `${RARITY_COLORS[compound.rarity]}50`,
-                      boxShadow: RARITY_GLOW[compound.rarity]
-                    }}
-                  >
-                    <div 
-                      className="text-3xl mb-2"
-                      style={{ textShadow: RARITY_GLOW[compound.rarity] }}
-                    >
-                      {compound.rarity === 'legendary' ? '👑' : 
-                       compound.rarity === 'epic' ? '🔮' : 
-                       compound.rarity === 'rare' ? '💎' : '⚗️'}
-                    </div>
-                    <p className="text-white font-mono font-bold text-lg">{compound.formula}</p>
-                    <p className="text-[#6B7280] text-xs truncate">{compound.name}</p>
-                    <p 
-                      className="text-xs mt-2 font-medium uppercase"
-                      style={{ color: RARITY_COLORS[compound.rarity] }}
-                    >
-                      {compound.rarity}
-                    </p>
-                    <p className="text-[#6B7280] text-xs mt-1">+{compound.points} pts</p>
-                    {compound.txHash && (
-                      <a
-                        href={`https://basescan.org/tx/${compound.txHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[#0A5CDD] text-xs mt-2 inline-block hover:underline"
-                      >
-                        View TX ↗
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <p className="text-[#DC2626] text-sm">Unknown combination</p>
             )}
+          </div>
+
+          {/* Reacting Overlay */}
+          {gameState === 'reacting' && (
+            <div className="absolute inset-0 bg-[#000814]/95 rounded-2xl flex flex-col items-center justify-center z-10">
+              <img 
+                src={MIXING_GIF} 
+                alt="Mixing..." 
+                className="w-40 h-40 object-cover rounded-xl mb-4"
+              />
+              <p className="text-[#0A5CDD] animate-pulse font-bold text-lg">Reacting...</p>
+              <p className="text-[#6B7280] text-sm mt-1">Molecules combining</p>
+            </div>
+          )}
+
+          {/* Rarity Reveal Overlay */}
+          {(gameState === 'reveal' || gameState === 'minting' || gameState === 'success') && result && showRarityReveal && (
+            <div className="absolute inset-0 bg-[#000814]/95 rounded-2xl flex flex-col items-center justify-center z-10">
+              {/* New Discovery Badge */}
+              {isNewDiscovery && gameState === 'reveal' && (
+                <div className="absolute top-4 right-4 bg-[#22C55E] text-white text-xs font-bold px-3 py-1 rounded-full animate-bounce">
+                  ✨ NEW DISCOVERY!
+                </div>
+              )}
+              
+              <div 
+                className="text-7xl mb-4 transition-all duration-100"
+                style={{ 
+                  filter: revealedRarity === result.rarity ? `drop-shadow(${RARITY_GLOW[revealedRarity]})` : 'none',
+                  transform: gameState === 'reveal' && revealedRarity !== result.rarity ? 'scale(1.2) rotate(5deg)' : 'scale(1)'
+                }}
+              >
+                {revealedRarity === 'legendary' ? '👑' : 
+                 revealedRarity === 'epic' ? '🔮' : 
+                 revealedRarity === 'rare' ? '💎' : '⚗️'}
+              </div>
+              
+              <p 
+                className="text-3xl font-black mb-2 transition-colors duration-100 tracking-wider"
+                style={{ color: revealedRarity ? RARITY_COLORS[revealedRarity] : '#fff' }}
+              >
+                {revealedRarity?.toUpperCase()}
+              </p>
+              
+              <p className="text-white text-2xl font-bold mb-1">{result.name}</p>
+              <p className="text-[#6B7280] font-mono">{result.formula}</p>
+              
+              {revealedRarity === result.rarity && (
+                <div className="mt-4 text-center">
+                  <p 
+                    className="text-2xl font-black animate-bounce"
+                    style={{ color: RARITY_COLORS[result.rarity] }}
+                  >
+                    +{Math.floor(result.points * streakMultiplier)} pts
+                  </p>
+                  {streakMultiplier > 1 && (
+                    <p className="text-[#F59E0B] text-sm">
+                      ({result.points} × {streakMultiplier} streak bonus)
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Failed Overlay */}
+          {gameState === 'failed' && (
+            <div className="absolute inset-0 bg-[#000814]/95 rounded-2xl flex flex-col items-center justify-center z-10">
+              <div className="text-7xl mb-4 animate-pulse">💨</div>
+              <p className="text-[#DC2626] font-bold text-2xl">Reaction Failed!</p>
+              <p className="text-[#6B7280] text-sm mt-2">Unknown compound</p>
+              <p className="text-[#4B5563] text-xs mt-4">💡 Tip: Try H₂O or NaCl</p>
+            </div>
+          )}
+        </div>
+
+        {/* Quick Suggestions */}
+        {gameState === 'idle' && selectedAtoms.length === 0 && (
+          <div className="mt-4">
+            <p className="text-[#6B7280] text-xs mb-2 text-center">QUICK START</p>
+            <div className="flex gap-2 justify-center flex-wrap">
+              {[
+                { formula: 'H₂O', atoms: ['H', 'H', 'O'], name: 'Water' },
+                { formula: 'NaCl', atoms: ['Na', 'Cl'], name: 'Salt' },
+                { formula: 'CO₂', atoms: ['C', 'O', 'O'], name: 'CO₂' },
+              ].map(suggestion => (
+                <button
+                  key={suggestion.formula}
+                  onClick={() => setSelectedAtoms(suggestion.atoms)}
+                  className="bg-[#001226] border border-[#0A5CDD]/30 rounded-lg px-3 py-2 text-sm hover:border-[#0A5CDD] transition-colors"
+                >
+                  <span className="text-white font-mono">{suggestion.formula}</span>
+                  <span className="text-[#6B7280] text-xs ml-2">{suggestion.name}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
-        {/* Badges Tab */}
-        {activeTab === 'badges' && (
-          <div className="space-y-3">
-            {BADGES.map(badge => {
-              const isEarned = userData?.badges?.includes(badge.id)
+        {/* Success Card */}
+        {gameState === 'success' && result && hash && (
+          <div 
+            className="mt-4 p-4 rounded-xl text-center border"
+            style={{ 
+              backgroundColor: `${RARITY_COLORS[result.rarity]}15`,
+              borderColor: `${RARITY_COLORS[result.rarity]}50`
+            }}
+          >
+            <div className="text-5xl mb-2">🎉</div>
+            <p className="text-white font-bold text-xl">NFT Minted!</p>
+            <p 
+              className="text-sm mt-1 font-medium"
+              style={{ color: RARITY_COLORS[result.rarity] }}
+            >
+              {result.rarity.toUpperCase()} {result.name}
+            </p>
+            <a
+              href={`https://basescan.org/tx/${hash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block mt-3 bg-[#0A5CDD] text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-[#0A5CDD]/80 transition-colors"
+            >
+              View on BaseScan ↗
+            </a>
+          </div>
+        )}
+
+        {/* Minting Status */}
+        {gameState === 'minting' && (
+          <div className="mt-4 p-4 rounded-xl text-center bg-[#0A5CDD]/20 border border-[#0A5CDD]/50">
+            <div className="text-3xl mb-2 animate-spin">⚛️</div>
+            <p className="text-[#0A5CDD] font-medium">
+              {isPending ? 'Confirm in wallet...' : isConfirming ? 'Confirming on Base...' : 'Processing...'}
+            </p>
+          </div>
+        )}
+
+        {/* Error Display */}
+        {error && gameState === 'reveal' && (
+          <div className="mt-4 p-3 rounded-xl text-center bg-[#DC2626]/20 border border-[#DC2626]/50">
+            <p className="text-[#DC2626] text-sm">
+              {error.message.includes('rejected') ? 'Transaction rejected' : 'Mint failed. Try again.'}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Atom Palette */}
+      <div className="px-4 pb-3">
+        <div className="bg-[#001226] border border-[#0A5CDD]/30 rounded-2xl p-4">
+          <div className="flex justify-between items-center mb-3">
+            <p className="text-[#6B7280] text-xs">ELEMENTS</p>
+            {selectedAtoms.length > 0 && (
+              <button
+                onClick={removeLastAtom}
+                className="text-[#6B7280] text-xs hover:text-white transition-colors"
+              >
+                ⌫ Undo
+              </button>
+            )}
+          </div>
+          <div className="flex justify-center gap-2 flex-wrap">
+            {ATOMS.map(atom => {
+              const count = atomCounts[atom.symbol] || 0
               return (
-                <div 
-                  key={badge.id} 
-                  className={`flex items-center gap-3 p-4 rounded-xl border transition-all ${
-                    isEarned 
-                      ? 'bg-[#001226] border-[#22C55E]/50' 
-                      : 'bg-[#0a0a0a] border-[#1F2937] opacity-50'
-                  }`}
+                <button
+                  key={atom.symbol}
+                  onClick={() => addAtom(atom.symbol)}
+                  disabled={gameState !== 'idle' || selectedAtoms.length >= 24}
+                  className="relative w-14 h-14 rounded-full flex flex-col items-center justify-center font-bold shadow-lg transition-all active:scale-90 hover:scale-110 disabled:opacity-40 disabled:hover:scale-100"
+                  style={{ 
+                    backgroundColor: atom.bgColor, 
+                    color: atom.color, 
+                    boxShadow: `0 4px 15px ${atom.bgColor}40` 
+                  }}
                 >
-                  <span className={`text-3xl ${isEarned ? '' : 'grayscale'}`}>{badge.icon}</span>
-                  <div className="flex-1">
-                    <p className={`font-medium ${isEarned ? 'text-white' : 'text-[#6B7280]'}`}>
-                      {badge.name}
-                    </p>
-                    <p className="text-xs text-[#6B7280]">{badge.requirement}</p>
-                  </div>
-                  {isEarned ? (
-                    <span className="text-[#22C55E] text-xl">✓</span>
-                  ) : (
-                    <span className="text-[#6B7280]">🔒</span>
+                  <span className="text-lg">{atom.symbol}</span>
+                  {count > 0 && (
+                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-[#0A5CDD] text-white text-xs rounded-full flex items-center justify-center font-bold">
+                      {count}
+                    </span>
                   )}
-                </div>
+                </button>
               )
             })}
           </div>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="px-4 pb-4 flex gap-3">
+        <button 
+          onClick={clearAtoms} 
+          disabled={selectedAtoms.length === 0 && gameState === 'idle'}
+          className="flex-1 bg-[#1F2937] text-white py-3 rounded-xl font-medium text-sm border border-[#374151] active:scale-95 transition-all disabled:opacity-50"
+        >
+          🗑 Clear
+        </button>
+        
+        {gameState === 'idle' && (
+          <button
+            onClick={handleReact}
+            disabled={selectedAtoms.length === 0}
+            className={`flex-[2] py-3 rounded-xl font-bold text-lg shadow-lg active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+              isExactMatch 
+                ? 'bg-gradient-to-r from-[#22C55E] to-[#16A34A] shadow-[#22C55E]/30' 
+                : 'bg-gradient-to-r from-[#0A5CDD] to-[#2563EB] shadow-[#0A5CDD]/30'
+            } text-white`}
+          >
+            {isExactMatch ? '✨ REACT!' : '🔥 REACT!'}
+          </button>
         )}
 
-        {/* Stats Tab */}
-        {activeTab === 'stats' && (
-          <div className="space-y-4">
-            <div className="bg-[#001226] border border-[#0A5CDD]/20 rounded-xl p-4">
-              <p className="text-[#6B7280] text-xs mb-3">OVERVIEW</p>
-              <div className="space-y-3">
-                <div className="flex justify-between">
-                  <span className="text-[#6B7280]">Total Points</span>
-                  <span className="text-white font-bold">{points.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#6B7280]">Total Mints</span>
-                  <span className="text-white font-bold">{userData?.totalMints || 0}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#6B7280]">Current Streak</span>
-                  <span className="text-white font-bold">{userData?.streak || 0} 🔥</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#6B7280]">Badges Earned</span>
-                  <span className="text-white font-bold">{userData?.badges?.length || 0} / {BADGES.length}</span>
-                </div>
-              </div>
-            </div>
+        {gameState === 'reveal' && result && (
+          <button
+            onClick={handleMint}
+            disabled={!isConnected}
+            className="flex-[2] bg-gradient-to-r from-[#22C55E] to-[#16A34A] text-white py-3 rounded-xl font-bold text-lg shadow-lg shadow-[#22C55E]/30 active:scale-95 transition-all disabled:opacity-50"
+          >
+            {isConnected ? '🎉 MINT NFT' : '🔗 Connect Wallet'}
+          </button>
+        )}
 
-            {/* Rarity Breakdown */}
-            <div className="bg-[#001226] border border-[#0A5CDD]/20 rounded-xl p-4">
-              <p className="text-[#6B7280] text-xs mb-3">RARITY BREAKDOWN</p>
-              {(['legendary', 'epic', 'rare', 'common'] as Rarity[]).map(rarity => {
-                const count = userData?.discoveries?.filter(d => d.rarity === rarity).length || 0
-                return (
-                  <div key={rarity} className="flex items-center gap-3 py-2">
-                    <span 
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: RARITY_COLORS[rarity] }}
-                    />
-                    <span className="flex-1 text-[#6B7280] capitalize">{rarity}</span>
-                    <span className="text-white font-bold">{count}</span>
-                  </div>
-                )
-              })}
-            </div>
+        {gameState === 'failed' && (
+          <button
+            onClick={clearAtoms}
+            className="flex-[2] bg-gradient-to-r from-[#0A5CDD] to-[#2563EB] text-white py-3 rounded-xl font-bold text-lg shadow-lg shadow-[#0A5CDD]/30 active:scale-95 transition-all"
+          >
+            🔄 Try Again
+          </button>
+        )}
 
-            {/* Recent Activity */}
-            <div className="bg-[#001226] border border-[#0A5CDD]/20 rounded-xl p-4">
-              <p className="text-[#6B7280] text-xs mb-3">RECENT MINTS</p>
-              {userData?.discoveries?.slice(0, 5).map((d, i) => (
-                <div key={i} className="flex items-center gap-3 py-2 border-b border-[#1F2937] last:border-0">
-                  <span 
-                    className="w-2 h-2 rounded-full"
-                    style={{ backgroundColor: RARITY_COLORS[d.rarity] }}
-                  />
-                  <span className="flex-1 text-white text-sm">{d.name}</span>
-                  <span className="text-[#6B7280] text-xs">+{d.points}</span>
-                </div>
-              )) || <p className="text-[#6B7280] text-sm">No mints yet</p>}
-            </div>
-          </div>
+        {gameState === 'success' && (
+          <button
+            onClick={clearAtoms}
+            className="flex-[2] bg-gradient-to-r from-[#0A5CDD] to-[#2563EB] text-white py-3 rounded-xl font-bold text-lg shadow-lg shadow-[#0A5CDD]/30 active:scale-95 transition-all"
+          >
+            🧪 New Reaction
+          </button>
+        )}
+
+        {(gameState === 'reacting' || gameState === 'minting') && (
+          <button
+            disabled
+            className="flex-[2] bg-[#374151] text-white py-3 rounded-xl font-bold text-lg opacity-70 cursor-not-allowed"
+          >
+            {gameState === 'reacting' ? '⚛️ Mixing...' : '⏳ Minting...'}
+          </button>
         )}
       </div>
     </div>
@@ -579,10 +629,10 @@ export function Profile({ farcasterUser }: ProfileProps) {
 }
 EOF
 
-echo "✅ components/game/Profile.tsx"
+echo "✅ components/game/GameArena.tsx - Enhanced Lab"
 
 # ============================================
-# 3. UPDATED APP.TSX WITH API SYNC
+# 2. UPDATE APP.TSX TO PASS DISCOVERIES
 # ============================================
 cat > components/pages/app.tsx << 'EOF'
 'use client'
@@ -602,7 +652,6 @@ interface FarcasterUser {
   pfpUrl?: string
 }
 
-// Farcaster SDK hook with fallback
 function useFarcasterOrLocal() {
   const [context, setContext] = useState<any>(undefined)
   const [farcasterUser, setFarcasterUser] = useState<FarcasterUser | undefined>()
@@ -619,7 +668,6 @@ function useFarcasterOrLocal() {
           setContext(ctx)
           setIsSDKLoaded(true)
           
-          // Extract Farcaster user info
           if (ctx.user) {
             setFarcasterUser({
               fid: ctx.user.fid,
@@ -657,15 +705,15 @@ export default function App() {
   const [earnedBadges, setEarnedBadges] = useState<string[]>([])
   const [isUserLoaded, setIsUserLoaded] = useState(false)
 
-  // Calculate level from points
   const level = Math.floor(points / 1000) + 1
 
-  // Fetch user data from API on connect
+  // Get list of discovered formulas for "NEW" badge detection
+  const discoveredFormulas = discoveries.map(d => d.formula)
+
   const fetchUserData = useCallback(async () => {
     if (!address) return
     
     try {
-      // Create/update user with Farcaster info
       await fetch('/api/user', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -676,7 +724,6 @@ export default function App() {
         })
       })
 
-      // Fetch user data
       const res = await fetch(`/api/user?address=${address}`)
       if (res.ok) {
         const data = await res.json()
@@ -704,11 +751,13 @@ export default function App() {
 
   const handleReaction = async (success: boolean, compound: RolledCompound | null) => {
     if (success && compound) {
-      // Optimistic update
-      setPoints(prev => prev + compound.points)
+      // Apply streak multiplier
+      const multiplier = streak >= 10 ? 2.0 : streak >= 7 ? 1.5 : streak >= 5 ? 1.25 : streak >= 3 ? 1.1 : 1.0
+      const bonusPoints = Math.floor(compound.points * multiplier)
+      
+      setPoints(prev => prev + bonusPoints)
       setStreak(prev => prev + 1)
     } else if (!success && address) {
-      // Reset streak on failed reaction
       setStreak(0)
       try {
         await fetch('/api/game/streak-reset', {
@@ -723,7 +772,6 @@ export default function App() {
   }
 
   const handleMintSuccess = async (compound: RolledCompound, txHash: string) => {
-    // Add to discoveries locally
     const newDiscovery = {
       ...compound,
       txHash,
@@ -731,7 +779,6 @@ export default function App() {
     }
     setDiscoveries(prev => [newDiscovery, ...prev])
     
-    // Refresh user data to get updated badges
     setTimeout(fetchUserData, 1000)
   }
 
@@ -769,7 +816,6 @@ export default function App() {
   return (
     <SafeAreaContainer insets={context?.client?.safeAreaInsets}>
       <div className="min-h-screen bg-[#000814] text-white flex flex-col">
-        {/* Header */}
         <Header 
           points={points} 
           streak={streak} 
@@ -778,7 +824,6 @@ export default function App() {
           pfpUrl={farcasterUser?.pfpUrl}
         />
         
-        {/* Main Content */}
         <div className="flex-1 overflow-hidden">
           {screen === 'lab' && (
             <GameArena 
@@ -786,13 +831,13 @@ export default function App() {
               streak={streak} 
               onReaction={handleReaction}
               onMintSuccess={handleMintSuccess}
+              recentDiscoveries={discoveredFormulas}
             />
           )}
           {screen === 'ranks' && <Leaderboard />}
           {screen === 'profile' && <Profile farcasterUser={farcasterUser} />}
         </div>
         
-        {/* Navbar */}
         <Navbar 
           activeTab={screen === 'lab' ? 'lab' : screen === 'ranks' ? 'ranks' : 'profile'} 
           onTabChange={(tab) => setScreen(tab)} 
@@ -803,119 +848,28 @@ export default function App() {
 }
 EOF
 
-echo "✅ components/pages/app.tsx"
-
-# ============================================
-# 4. UPDATE INDEX EXPORT
-# ============================================
-cat > components/game/index.ts << 'EOF'
-export { SplashScreen } from './SplashScreen'
-export { Navbar } from './Navbar'
-export { GameArena } from './GameArena'
-export { Profile } from './Profile'
-export { Leaderboard } from './Leaderboard'
-export { Header } from './Header'
-EOF
-
-echo "✅ components/game/index.ts"
-
-# ============================================
-# 5. UPDATED HEADER WITH AVATAR SUPPORT
-# ============================================
-cat > components/game/Header.tsx << 'EOF'
-'use client'
-
-import { useAccount } from 'wagmi'
-
-interface HeaderProps {
-  points: number
-  streak: number
-  level: number
-  username?: string
-  pfpUrl?: string
-}
-
-export function Header({ points, streak, level, username, pfpUrl }: HeaderProps) {
-  const { address, isConnected } = useAccount()
-
-  return (
-    <header className="bg-[#001226] border-b border-[#0A5CDD]/20 px-4 py-3">
-      <div className="flex items-center justify-between">
-        {/* Logo + Name */}
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-gradient-to-br from-[#0A5CDD] to-[#2563EB] rounded-lg flex items-center justify-center">
-            <span className="text-lg">⚛️</span>
-          </div>
-          <div>
-            <p className="text-white font-bold text-sm leading-tight">Chain Reaction</p>
-            <p className="text-[#6B7280] text-xs leading-tight">Labs</p>
-          </div>
-        </div>
-
-        {/* Stats */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 bg-[#0A0A0A] px-2 py-1 rounded-lg">
-            <span className="text-sm">🔥</span>
-            <span className="text-white text-sm font-bold">{streak}</span>
-          </div>
-          <div className="flex items-center gap-1 bg-[#0A0A0A] px-2 py-1 rounded-lg">
-            <span className="text-sm">⭐</span>
-            <span className="text-white text-sm font-bold">{points.toLocaleString()}</span>
-          </div>
-          <div className="flex items-center gap-1 bg-[#0A5CDD]/20 px-2 py-1 rounded-lg">
-            <span className="text-[#0A5CDD] text-sm font-bold">Lv.{level}</span>
-          </div>
-        </div>
-
-        {/* Avatar */}
-        <div className="flex items-center gap-2">
-          {pfpUrl ? (
-            <img 
-              src={pfpUrl} 
-              alt={username || 'Profile'} 
-              className="w-8 h-8 rounded-full object-cover border border-[#0A5CDD]/50"
-            />
-          ) : (
-            <div className="w-8 h-8 bg-[#1F2937] rounded-full flex items-center justify-center">
-              {isConnected ? (
-                <span className="text-xs text-[#6B7280]">
-                  {address?.slice(2, 4).toUpperCase()}
-                </span>
-              ) : (
-                <span className="text-[#6B7280]">👤</span>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </header>
-  )
-}
-EOF
-
-echo "✅ components/game/Header.tsx"
+echo "✅ components/pages/app.tsx - Updated with discovery tracking"
 
 echo ""
-echo "==================================================="
-echo "🎉 Phase 5 Complete!"
-echo "==================================================="
+echo "==============================================="
+echo "🎉 Phase 6 Complete - Enhanced Lab Page!"
+echo "==============================================="
 echo ""
-echo "Files created/updated:"
-echo "  ├── components/game/Leaderboard.tsx  (NEW - live rankings)"
-echo "  ├── components/game/Profile.tsx      (Updated - API data)"
-echo "  ├── components/game/Header.tsx       (Updated - avatar support)"
-echo "  ├── components/game/index.ts         (Updated exports)"
-echo "  └── components/pages/app.tsx         (Updated - state sync)"
+echo "New Features:"
+echo "  ✅ Animated test tube with bubbling liquid"
+echo "  ✅ Real-time compound preview as you build"
+echo "  ✅ Atom count badges on palette"
+echo "  ✅ Streak multiplier display (1.1x → 2x)"
+echo "  ✅ 'NEW DISCOVERY' badge for first-time finds"
+echo "  ✅ Quick-start compound buttons"
+echo "  ✅ Undo last atom button"
+echo "  ✅ Visual feedback for exact matches (green button)"
+echo "  ✅ Smoother animations and glow effects"
 echo ""
-echo "Features:"
-echo "  ✅ Live leaderboard from /api/leaderboard"
-echo "  ✅ Top 3 podium display"
-echo "  ✅ Your rank sticky footer"
-echo "  ✅ Profile with real NFT gallery"
-echo "  ✅ Rarity breakdown stats"
-echo "  ✅ Farcaster username + avatar display"
-echo "  ✅ Level progress bar"
-echo "  ✅ State syncs with database on load"
-echo "  ✅ Streak resets on failed reactions"
+echo "Streak Bonuses:"
+echo "  3+ streak  → 1.1x points (✨ WARMING UP)"
+echo "  5+ streak  → 1.25x points (💥 HOT)"
+echo "  7+ streak  → 1.5x points (⚡ ON FIRE)"
+echo "  10+ streak → 2.0x points (🔥 UNSTOPPABLE)"
 echo ""
-echo "Run: chmod +x phase5-profile-leaderboard.sh && ./phase5-profile-leaderboard.sh"
+echo "Run: chmod +x phase6-enhanced-lab.sh && ./phase6-enhanced-lab.sh"
